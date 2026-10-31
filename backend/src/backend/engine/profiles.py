@@ -4,9 +4,9 @@ All limits are public, typical defaults for decision support. They are not the
 limits of any operator and must be replaced by site-approved values.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 
 Comparison = Literal["max", "min"]
 Segment = Literal["span", "work"]
@@ -80,7 +80,7 @@ SITES: dict[str, Site] = {
             port="Esbjerg",
             ctv_transit_hours=2.0,
             coordinates_verified=False,
-            note="Approximate centre; verify on EMODnet. Transit about 2 h from Esbjerg.",
+            note="Approximate centre; verify on EMODnet. Transit about 2 h from Esbjerg (Wikipedia).",
         ),
         Site(
             id="hr3",
@@ -178,4 +178,28 @@ def build_limits(
             segment="span",
             source="Project assumption, not an industry standard.",
         ),
+    )
+
+
+def profile_to_dict(profile: JobProfile) -> dict[str, Any]:
+    data = asdict(profile)
+    data["start_date"] = profile.start_date.isoformat()
+    data["end_date"] = profile.end_date.isoformat()
+    return data
+
+
+def profile_from_dict(data: dict[str, Any]) -> JobProfile:
+    """Rebuild a profile exactly as saved, including its limits."""
+    return JobProfile(
+        id=data["id"],
+        site=Site(**data["site"]),
+        vessel=data["vessel"],
+        task=data["task"],
+        work_hours_per_day=data["work_hours_per_day"],
+        days_needed=data["days_needed"],
+        start_date=date.fromisoformat(data["start_date"]),
+        end_date=date.fromisoformat(data["end_date"]),
+        consecutive=data["consecutive"],
+        limits=tuple(Limit(**limit) for limit in data["limits"]),
+        not_evaluated=tuple(data["not_evaluated"]),
     )

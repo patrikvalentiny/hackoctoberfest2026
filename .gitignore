@@ -21,3 +21,6 @@
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local forecast cache
+data/cache/
