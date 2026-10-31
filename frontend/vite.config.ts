@@ -31,19 +31,6 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,webmanifest}'],
-        runtimeCaching: [
-          {
-            urlPattern: /\.wasm$/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'onnx-runtime',
-              expiration: {
-                maxEntries: 4,
-                maxAgeSeconds: 30 * 24 * 60 * 60,
-              },
-            },
-          },
-        ],
       },
     }),
   ],

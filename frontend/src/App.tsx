@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Anchor,
   ArrowClockwise,
-  Brain,
-  CheckCircle,
   CloudArrowDown,
   Compass,
   DownloadSimple,
@@ -25,14 +23,6 @@ import {
 import { readForecast, readSavedStation, saveForecast, saveStation } from '@/lib/forecast-cache'
 import { fetchForecast, formatNumber, formatUtcTime, siteKey } from '@/lib/weather'
 import type { CachedForecast, SiteProfile, WeatherForecast } from '@/lib/weather'
-
-type SummaryState = 'idle' | 'loading' | 'summarizing' | 'ready' | 'error'
-
-type SummaryWorkerMessage =
-  | { requestId: number; type: 'status'; message: string }
-  | { requestId: number; type: 'progress'; progress: number }
-  | { requestId: number; type: 'summary'; text: string }
-  | { requestId: number; type: 'error'; message: string }
 
 function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong.'
@@ -68,20 +58,10 @@ function App() {
   const [online, setOnline] = useState(navigator.onLine)
   const [fetching, setFetching] = useState(false)
   const [error, setError] = useState(initialStation.error)
-  const [summary, setSummary] = useState('')
-  const [summaryState, setSummaryState] = useState<SummaryState>('idle')
-  const [summaryMessage, setSummaryMessage] = useState('')
-  const [modelProgress, setModelProgress] = useState<number>()
-  const workerRef = useRef<Worker | null>(null)
-  const summaryRequestId = useRef(0)
 
   const loadForecast = useCallback(async (profile: SiteProfile) => {
     setFetching(true)
     setError('')
-    setSummary('')
-    setSummaryState('idle')
-    setSummaryMessage('')
-    summaryRequestId.current += 1
 
     try {
       const nextForecast = await fetchForecast(profile)
@@ -148,41 +128,6 @@ function App() {
     }
   }, [loadForecast, online, site])
 
-  useEffect(() => {
-    const worker = new Worker(new URL('./workers/summary.worker.ts', import.meta.url), {
-      type: 'module',
-    })
-    workerRef.current = worker
-    worker.addEventListener('message', (event: MessageEvent<SummaryWorkerMessage>) => {
-      const message = event.data
-      if (message.requestId !== summaryRequestId.current) return
-
-      if (message.type === 'status') {
-        setSummaryMessage(message.message)
-        setSummaryState(
-          message.message.startsWith('Summarizing') ? 'summarizing' : 'loading',
-        )
-      } else if (message.type === 'progress') {
-        setModelProgress(message.progress)
-      } else if (message.type === 'summary') {
-        setSummary(message.text)
-        setSummaryMessage('')
-        setSummaryState('ready')
-      } else {
-        setSummaryMessage(message.message)
-        setSummaryState('error')
-      }
-    })
-    worker.addEventListener('error', (event) => {
-      setSummaryMessage(event.message || 'The local model worker stopped unexpectedly.')
-      setSummaryState('error')
-    })
-    return () => {
-      worker.terminate()
-      workerRef.current = null
-    }
-  }, [])
-
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const profile: SiteProfile = {
@@ -199,27 +144,9 @@ function App() {
       saveStation(profile)
       setSite(profile)
       setError('')
-      setSummary('')
-      setSummaryState('idle')
-      setSummaryMessage('')
     } catch (storageError) {
       setError(messageFrom(storageError))
     }
-  }
-
-  function summarizeLocally() {
-    if (!forecast || !workerRef.current) return
-    const requestId = summaryRequestId.current + 1
-    summaryRequestId.current = requestId
-    setSummary('')
-    setSummaryState('loading')
-    setSummaryMessage(
-      online
-        ? 'Preparing a local model. First use downloads model files.'
-        : 'Looking for the model files saved on this device.',
-    )
-    setModelProgress(undefined)
-    workerRef.current.postMessage({ requestId, hours: forecast.hours })
   }
 
   const outlook = useMemo(
@@ -423,66 +350,6 @@ function App() {
                 </Card>
               </section>
 
-              <section aria-labelledby="summary-heading">
-                <div className="mb-4 flex items-center gap-2">
-                  <Brain aria-hidden="true" className="text-primary" size={19} />
-                  <h2 id="summary-heading" className="text-lg font-semibold">
-                    On-device summary
-                  </h2>
-                </div>
-                <Card className="rounded-xl shadow-none">
-                  <CardHeader className="pb-0">
-                    <CardTitle className="text-sm font-medium">
-                      Qwen 3 0.6B runs in this browser
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4 p-5 pt-3 sm:p-6 sm:pt-3">
-                    {summary ? (
-                      <p aria-live="polite" className="text-sm leading-relaxed">
-                        {summary}
-                      </p>
-                    ) : (
-                      <p aria-live="polite" className="text-sm leading-relaxed text-muted-foreground">
-                        {summaryMessage ||
-                          'The local model summarizes downloaded or saved forecast data. It does not create weather forecasts.'}
-                      </p>
-                    )}
-                    {modelProgress !== undefined && summaryState === 'loading' && (
-                      <p className="text-xs text-muted-foreground">
-                        Model files: {modelProgress}% loaded
-                      </p>
-                    )}
-                    <Button
-                      onClick={summarizeLocally}
-                      disabled={
-                        summaryState === 'loading' ||
-                        summaryState === 'summarizing' ||
-                        !forecast
-                      }
-                    >
-                      {summaryState === 'ready' ? (
-                        <CheckCircle aria-hidden="true" size={17} />
-                      ) : summaryState === 'loading' ||
-                        summaryState === 'summarizing' ? (
-                        <ArrowClockwise
-                          aria-hidden="true"
-                          className="animate-spin"
-                          size={17}
-                        />
-                      ) : (
-                        <Brain aria-hidden="true" size={17} />
-                      )}
-                      {summaryState === 'ready' ? 'Refresh summary' : 'Summarize locally'}
-                    </Button>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      First use needs internet to cache model files. Once cached, model
-                      summaries can run offline in this browser. Browser storage may be
-                      cleared by the device.
-                    </p>
-                  </CardContent>
-                </Card>
-              </section>
-
               <p className="text-xs text-muted-foreground">
                 Source:{' '}
                 <a
@@ -575,7 +442,7 @@ function App() {
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               The app shell and saved forecasts stay on this device. Refresh forecasts
-              and load the local model before leaving connectivity.
+              before leaving connectivity.
             </p>
             <p className="mt-3 text-xs text-muted-foreground">
               {savedAt
