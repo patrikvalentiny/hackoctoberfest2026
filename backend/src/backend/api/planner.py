@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 import httpx
@@ -34,6 +34,8 @@ from backend.engine.windows import (
 from backend.ingest import ecmwf_waef
 from backend.ingest.dmi_lightning import (
     ATTRIBUTION as LIGHTNING_ATTRIBUTION,
+)
+from backend.ingest.dmi_lightning import (
     PROCEDURE_REFERENCE,
     LightningError,
     fetch_lightning,
@@ -77,13 +79,15 @@ class ProfileRequest(BaseModel):
     sov_hs_limit_m: float | None = None
 
     @model_validator(mode="after")
-    def check_dates(self) -> "ProfileRequest":
+    def check_dates(self) -> ProfileRequest:
         start = self.start_date or _today()
         end = self.end_date or start + timedelta(days=OUTLOOK_DAYS - 1)
         if end < start:
             raise ValueError("end_date must not be before start_date.")
         if (end - start).days >= OUTLOOK_DAYS:
             raise ValueError(f"The planning range is at most {OUTLOOK_DAYS} days.")
+        if self.days_needed > (end - start).days + 1:
+            raise ValueError("days_needed is longer than the planning range.")
         self.start_date, self.end_date = start, end
         return self
 
@@ -184,22 +188,32 @@ async def _forecast(site_id: str) -> SiteForecast:
         if cached and now - cached.fetched_at < FORECAST_TTL:
             return cached
         site = SITES[site_id]
+        waves = _waves(site_id)
         stored = store().latest_payloads(site_id)
-        if stored and now - stored[0] < FORECAST_TTL:
-            forecast = build_site_forecast(site, stored[1], stored[0], _waves(site_id))
+        stored_forecast = None
+        if stored:
+            try:
+                stored_forecast = build_site_forecast(site, stored[1], stored[0], waves)
+            except ProviderError:
+                logger.warning("Ignoring unreadable stored forecast for %s.", site_id)
+        if stored_forecast and now - stored_forecast.fetched_at < FORECAST_TTL:
+            forecast = stored_forecast
         else:
             try:
                 payloads = await fetch_payloads(site)
                 fetched_at = datetime.now(UTC)
+                # Build before saving, so unusable payloads never reach the cache.
+                forecast = build_site_forecast(site, payloads, fetched_at, waves)
                 store().save_payloads(site_id, fetched_at, payloads)
-                forecast = build_site_forecast(site, payloads, fetched_at, _waves(site_id))
             except ProviderError as error:
-                if not stored:
+                if stored_forecast is None:
                     raise HTTPException(status_code=502, detail=str(error)) from error
-                forecast = build_site_forecast(site, stored[1], stored[0], _waves(site_id))
                 forecast = dataclasses.replace(
-                    forecast,
-                    notes=(f"Live refresh failed ({error}); showing the last stored forecast.", *forecast.notes),
+                    stored_forecast,
+                    notes=(
+                        f"Live refresh failed ({error}); showing the last stored forecast.",
+                        *stored_forecast.notes,
+                    ),
                 )
         _forecasts[site_id] = forecast
         return forecast
@@ -380,7 +394,7 @@ def activate_pack(pack: Any) -> JobProfile:
 
 
 @router.post("/briefing-pack")
-def load_briefing_pack(pack: dict[str, Any] = Body(...)) -> dict[str, Any]:
+def load_briefing_pack(pack: Annotated[dict[str, Any], Body()]) -> dict[str, Any]:
     """Switch the pack's site to offline mode using the pack's forecast."""
     try:
         profile = activate_pack(pack)
@@ -431,6 +445,10 @@ async def _wave_ensemble_loop() -> None:
         except (WaveDataError, httpx.HTTPError) as error:
             _waef_status.update(state="error", message=str(error))
             logger.warning("ECMWF wave ensemble refresh failed: %s", error)
+        except Exception as error:
+            # Keep the loop alive; report the unexpected failure.
+            _waef_status.update(state="error", message=f"Unexpected error: {error}")
+            logger.exception("ECMWF wave ensemble refresh failed unexpectedly.")
         await asyncio.sleep(WAEF_CHECK_EVERY.total_seconds())
 
 

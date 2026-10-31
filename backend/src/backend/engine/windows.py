@@ -6,7 +6,7 @@ results support planning only; they never state that conditions are safe.
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from astral import Observer
@@ -192,19 +192,23 @@ def evaluate_day(profile: JobProfile, forecast: SiteForecast, day: date) -> DayR
         )
 
     # Windows start no earlier than the data time, so today's past hours drop out.
-    starts = _candidate_starts(max(rise, forecast.fetched_at), set_, total)
+    first_start = max(rise, forecast.fetched_at)
+    starts = _candidate_starts(first_start, set_, total)
     if not starts:
-        remaining = set_ - max(rise, min(forecast.fetched_at, set_))
+        if forecast.fetched_at >= set_:
+            note = "Daylight had already ended when this forecast was fetched."
+        else:
+            remaining = set_ - first_start
+            note = (
+                f"Transit and work need {total.total_seconds() / 3600:.1f} h but daylight "
+                f"left is {remaining.total_seconds() / 3600:.1f} h."
+            )
         return DayResult(
             date=day, sunrise=rise, sunset=set_, confidence=confidence, members=members,
             members_with_window=0, probability=0.0, window=None, members_in_window=0,
             deterministic_window=None, deterministic_evaluated=False,
             limiting_parameter="daylight", limit_failures={"daylight": members},
-            recompute_at=recompute,
-            note=(
-                f"Transit and work need {total.total_seconds() / 3600:.1f} h but daylight "
-                f"left is {remaining.total_seconds() / 3600:.1f} h."
-            ),
+            recompute_at=recompute, note=note,
         )
 
     checker = _Checker(forecast.times, forecast.ensemble, profile.limits)
@@ -220,7 +224,7 @@ def evaluate_day(profile: JobProfile, forecast: SiteForecast, day: date) -> DayR
         if has_window:
             members_with_window += 1
         else:
-            for limit_id in checker.failing(member, rise, set_, list(profile.limits)):
+            for limit_id in checker.failing(member, starts[0], set_, list(profile.limits)):
                 failures[limit_id] += 1
 
     best = max(range(len(starts)), key=lambda i: (passing[i], -i))
@@ -326,9 +330,9 @@ def explain_day(profile: JobProfile, forecast: SiteForecast, day: date) -> tuple
 def _explain_hour(
     profile: JobProfile, forecast: SiteForecast, checker: _Checker, hour: datetime, index: int, result: DayResult
 ) -> dict:
-    variables = {}
+    variables: dict[str, dict[str, float] | None] = {}
     for name, series in forecast.ensemble.variables.items():
-        values = [member[index] for member in series if member[index] is not None]
+        values = [value for member in series if (value := member[index]) is not None]
         if not values:
             variables[name] = None
         elif name in forecast.ensemble.deterministic_variables:
@@ -361,9 +365,9 @@ def _explain_hour(
 def _median_set(members: MemberSet) -> MemberSet:
     variables = {}
     for name, series in members.variables.items():
-        median = []
+        median: list[float | None] = []
         for index in range(len(series[0])):
-            values = [member[index] for member in series if member[index] is not None]
+            values = [value for member in series if (value := member[index]) is not None]
             median.append(_quantile(values, 0.5) if values else None)
         variables[name] = [median]
     return MemberSet(name=f"{members.name} median", variables=variables)
@@ -379,39 +383,63 @@ def check_task_fits(
     """
     start = start.astimezone(UTC)
     age = now - forecast.fetched_at
-    _, set_ = daylight(profile.site, start.astimezone(LOCAL_TZ).date())
-    base = dict(data_age_hours=round(age.total_seconds() / 3600, 1), sunset=set_)
-    if age > STALE_AFTER:
+    rise, set_ = daylight(profile.site, start.astimezone(LOCAL_TZ).date())
+    age_hours = round(age.total_seconds() / 3600, 1)
+
+    def result(fits: bool | None, note: str | None, **values: Any) -> TaskFit:
         return TaskFit(
-            **base, reference=None, fits=None, last_transfer_back=None, latest_start=None,
-            ensemble_fraction=None, blocking_limits=(),
-            note="Forecast data is older than 12 hours; no timing is given. Ask the vessel.",
+            data_age_hours=age_hours,
+            sunset=set_,
+            fits=fits,
+            note=note,
+            reference=values.get("reference"),
+            last_transfer_back=values.get("last_transfer_back"),
+            latest_start=values.get("latest_start"),
+            ensemble_fraction=values.get("ensemble_fraction"),
+            blocking_limits=tuple(sorted(values.get("blocking_limits", ()))),
         )
 
-    transit = timedelta(hours=profile.transit_hours)
-    span_limits = [limit for limit in profile.limits if limit.segment == "span"]
-    work_limits = [limit for limit in profile.limits if limit.segment == "work"]
+    if age > STALE_AFTER:
+        return result(None, "Forecast data is older than 12 hours; no timing is given. Ask the vessel.")
 
-    reference_name, reference = "ensemble median", _median_set(forecast.ensemble)
-    if forecast.deterministic is not None:
-        if _Checker(forecast.times, forecast.deterministic, profile.limits).complete(start, set_):
-            reference_name, reference = "DMI HARMONIE deterministic", forecast.deterministic
-    checker = _Checker(forecast.times, reference, profile.limits)
+    transit = timedelta(hours=profile.transit_hours)
+    if start + transit > set_:
+        return result(False, "No transfer back before sunset from this start time.", blocking_limits={"daylight"})
 
     ensemble = _Checker(forecast.times, forecast.ensemble, profile.limits)
-    ensemble_ok = sum(
-        not ensemble.failing(m, start, start + duration, work_limits)
-        and not ensemble.failing(m, start, start + duration + transit, span_limits)
-        for m in range(ensemble.members)
+    if ensemble.hours(start, set_) is None:
+        return result(None, "The forecast has no data for this time.")
+
+    span_limits = [limit for limit in profile.limits if limit.segment == "span"]
+    work_limits = [limit for limit in profile.limits if limit.segment == "work"]
+    reference_name, reference = "ensemble median", _median_set(forecast.ensemble)
+    if forecast.deterministic is not None and _Checker(
+        forecast.times, forecast.deterministic, profile.limits
+    ).complete(start, set_):
+        reference_name, reference = "DMI HARMONIE deterministic", forecast.deterministic
+    checker = _Checker(forecast.times, reference, profile.limits)
+
+    task_end = start + duration
+    ensemble_ok = (
+        0
+        if task_end + transit > set_
+        else sum(
+            not ensemble.failing(m, start, task_end, work_limits)
+            and not ensemble.failing(m, start, task_end + transit, span_limits)
+            for m in range(ensemble.members)
+        )
     )
     ensemble_fraction = round(ensemble_ok / ensemble.members, 3)
+    before_sunrise = "Start is before sunrise." if start < rise else None
 
     blocking = checker.failing(0, start, start + transit, span_limits)
-    if start + transit > set_ or blocking:
-        return TaskFit(
-            **base, reference=reference_name, fits=False, last_transfer_back=None, latest_start=None,
-            ensemble_fraction=ensemble_fraction, blocking_limits=tuple(sorted(blocking or {"daylight"})),
-            note="No transfer back within daylight and limits from this start time.",
+    if blocking:
+        return result(
+            False,
+            "No transfer back within limits from this start time.",
+            reference=reference_name,
+            ensemble_fraction=ensemble_fraction,
+            blocking_limits=blocking,
         )
 
     last_transfer = start
@@ -428,17 +456,21 @@ def check_task_fits(
             latest_start = candidate
         candidate += STEP
 
-    fits = start + duration <= last_transfer and not checker.failing(0, start, start + duration, work_limits)
+    fits = task_end <= last_transfer and not checker.failing(0, start, task_end, work_limits)
     blocking_limits: set[str] = set()
     if not fits:
-        blocking_limits = checker.failing(0, start, start + duration, work_limits)
-        if start + duration > last_transfer:
-            ended = checker.failing(0, start, start + duration + transit, span_limits)
+        blocking_limits = checker.failing(0, start, task_end, work_limits)
+        if task_end > last_transfer:
+            ended = checker.failing(0, start, task_end + transit, span_limits)
             blocking_limits |= ended or {"daylight"}
-    return TaskFit(
-        **base, reference=reference_name, fits=fits, last_transfer_back=last_transfer,
-        latest_start=latest_start, ensemble_fraction=ensemble_fraction,
-        blocking_limits=tuple(sorted(blocking_limits)), note=None,
+    return result(
+        fits,
+        before_sunrise,
+        reference=reference_name,
+        last_transfer_back=last_transfer,
+        latest_start=latest_start,
+        ensemble_fraction=ensemble_fraction,
+        blocking_limits=blocking_limits,
     )
 
 

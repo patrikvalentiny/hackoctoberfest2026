@@ -51,8 +51,11 @@ real age.
   360 h), paired with wind members by number and interpolated from six-hourly
   to hourly. The control wind run has no wave pair and is left out. Wind and
   wave runs can differ by up to 12 h, so pairing is approximate. Until a run is
-  downloaded, deterministic ECMWF WAM waves are shared by all members and
+  downloaded, or when the stored run is more than 36 h older than the wind
+  data, deterministic ECMWF WAM waves are shared by all members and
   probabilities reflect wind spread only; responses say which applies.
+- Swell and the EC46 outlook are optional: if either fails, the forecast is
+  still built and a note says what is missing.
 - Swell: Open-Meteo Marine default model, display only.
 - Visibility: DMI seamless deterministic via Open-Meteo.
 - 0–60 h: DMI HARMONIE AROME deterministic, reported as `deterministic_window`
@@ -104,7 +107,11 @@ Offline, `conditions-now` reports that live lightning is unavailable, and
 - Ranking: probability, then limit margin (smallest relative distance to a
   limit in the window, ensemble median), then confidence, then date.
 - `recompute_at` is sunset minus 60 h, when the day enters the DMI horizon.
-- `task-fit` withholds timing when data is older than 12 hours.
+- `task-fit` withholds timing when data is older than 12 hours, answers
+  `fits: null` when the forecast has no data for the time, reports only
+  `daylight` when the trip back cannot finish before sunset, and notes a start
+  before sunrise.
+- A profile's `days_needed` cannot exceed its date range (at most 21 days).
 - Lightning, wave period and direction, currents and vessel motion are not
   part of the window calculation; every profile lists this in `not_evaluated`.
 
@@ -120,3 +127,7 @@ Data sources and licences are listed in [ATTRIBUTION.md](../ATTRIBUTION.md).
 ```powershell
 uv run --directory backend python -m unittest discover -s tests
 ```
+
+Tests never use the network or the real cache: providers are mocked (ECMWF
+with real GRIB messages built by eccodes) and each API test gets an in-memory
+SQLite store. `tests/support.py` holds the shared fixtures.

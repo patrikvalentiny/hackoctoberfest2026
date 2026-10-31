@@ -11,12 +11,18 @@
 """
 
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
 
-from backend.engine.forecast import MemberSet, Series, SiteForecast, SourceInfo, WeeklyOutlook
+from backend.engine.forecast import (
+    MemberSet,
+    Series,
+    SiteForecast,
+    SourceInfo,
+    WeeklyOutlook,
+)
 from backend.engine.profiles import Site
 from backend.ingest.ecmwf_waef import WaveEnsemble, hourly
 
@@ -34,6 +40,8 @@ OUTLOOK_MODEL = "ecmwf_ec46"
 
 # Payloads the forecast cannot be built without; the rest are optional.
 REQUIRED = ("ensemble", "marine", "visibility", "dmi")
+# A wave ensemble run this much older than the wind data is not paired.
+MAX_WAVE_RUN_AGE = timedelta(hours=36)
 
 
 class ProviderError(Exception):
@@ -86,11 +94,16 @@ def _weekly_outlook(payload: Any) -> tuple[WeeklyOutlook, ...]:
     count = len(weekly["time"])
     means = _values(weekly, "wind_speed_10m_mean", count, "Open-Meteo seasonal")
     anomalies = _values(weekly, "wind_speed_10m_anomaly", count, "Open-Meteo seasonal")
-    return tuple(
-        WeeklyOutlook(week_start=date.fromisoformat(start), wind_speed_10m_mean_ms=mean, wind_speed_10m_anomaly_ms=anomaly)
-        for start, mean, anomaly in zip(weekly["time"], means, anomalies, strict=True)
-        if mean is not None
-    )
+    try:
+        return tuple(
+            WeeklyOutlook(
+                week_start=date.fromisoformat(start), wind_speed_10m_mean_ms=mean, wind_speed_10m_anomaly_ms=anomaly
+            )
+            for start, mean, anomaly in zip(weekly["time"], means, anomalies, strict=True)
+            if mean is not None
+        )
+    except (TypeError, ValueError) as error:
+        raise ProviderError("Open-Meteo seasonal returned an invalid week.") from error
 
 
 def build_site_forecast(
@@ -123,18 +136,34 @@ def build_site_forecast(
     if all(value is None for value in wam["wave_height"]):
         raise ProviderError("Open-Meteo marine returned no wave heights for this site.")
     notes: list[str] = []
-    swell = {"swell_wave_height": [None] * count, "swell_wave_period": [None] * count}
-    if payloads.get("swell") is not None:
+    empty: Series = [None] * count
+    swell: dict[str, Series] = {"swell_wave_height": empty, "swell_wave_period": empty}
+    try:
+        if payloads.get("swell") is None:
+            raise ProviderError("no swell response")
         swell = deterministic(payloads["swell"], "Open-Meteo marine swell", list(swell))
-    else:
+    except ProviderError:
         notes.append("Swell data was unavailable for this fetch.")
     outlook: tuple[WeeklyOutlook, ...] = ()
-    if payloads.get("seasonal") is not None:
+    try:
+        if payloads.get("seasonal") is None:
+            raise ProviderError("no seasonal response")
         outlook = _weekly_outlook(payloads["seasonal"])
-    else:
+    except ProviderError:
         notes.append("The EC46 weekly outlook was unavailable for this fetch.")
 
-    shared = {
+    numbers = [n for n in range(1, len(wind_10m)) if waves is not None and n in waves.members]
+    if waves is not None and not numbers:
+        notes.append("The ECMWF wave ensemble had no members matching the wind ensemble; it was not used.")
+        waves = None
+    if waves is not None and fetched_at - waves.run > MAX_WAVE_RUN_AGE:
+        notes.append(
+            f"The stored ECMWF wave ensemble (run {waves.run:%Y-%m-%d %H} UTC) is too old to pair "
+            "with this wind forecast; it was not used."
+        )
+        waves = None
+
+    shared: dict[str, Series] = {
         "wave_period_s": wam["wave_period"],
         "wave_direction_deg": wam["wave_direction"],
         "swell_wave_height_m": swell["swell_wave_height"],
@@ -144,7 +173,6 @@ def build_site_forecast(
     if waves is not None:
         # Wind member n (Open-Meteo memberNN) is paired with waef member n.
         # The control wind run has no waef counterpart and is left out.
-        numbers = [n for n in range(1, len(wind_10m)) if n in waves.members]
         wave_members = []
         for number in numbers:
             interpolated = hourly(waves, number, times)
@@ -356,14 +384,17 @@ async def fetch_payloads(site: Site, client: httpx.AsyncClient | None = None) ->
             await http.aclose()
     payloads: dict[str, Any] = {}
     for name, result in zip(requests, results, strict=True):
-        if isinstance(result, BaseException):
-            if name in REQUIRED:
-                if isinstance(result, ValueError):
-                    raise ProviderError("Open-Meteo returned unreadable forecast data.") from result
-                raise ProviderError("Open-Meteo is unavailable. Try again when online.") from result
-            payloads[name] = None
-        else:
+        if not isinstance(result, BaseException):
             payloads[name] = result
+        elif not isinstance(result, (httpx.HTTPError, ValueError)):
+            # A programming error, not a provider problem; do not hide it.
+            raise result
+        elif name not in REQUIRED:
+            payloads[name] = None
+        elif isinstance(result, ValueError):
+            raise ProviderError("Open-Meteo returned unreadable forecast data.") from result
+        else:
+            raise ProviderError("Open-Meteo is unavailable. Try again when online.") from result
     return payloads
 
 

@@ -50,7 +50,7 @@ class WaveEnsemble:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WaveEnsemble":
+    def from_dict(cls, data: dict[str, Any]) -> WaveEnsemble:
         return cls(
             run=datetime.fromisoformat(data["run"]),
             times=[datetime.fromisoformat(time) for time in data["times"]],
@@ -83,13 +83,31 @@ async def latest_complete_run(client: httpx.AsyncClient, now: datetime) -> datet
     return None
 
 
+async def _get(
+    client: httpx.AsyncClient, url: str, limit: asyncio.Semaphore, headers: dict[str, str] | None = None
+) -> httpx.Response:
+    """GET with three attempts; data.ecmwf.int occasionally drops requests."""
+    for attempt in range(3):
+        try:
+            async with limit:
+                response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError:
+            if attempt == 2:
+                raise
+            await asyncio.sleep(1 + attempt)
+    raise AssertionError("unreachable")
+
+
 async def _swh_messages(
     client: httpx.AsyncClient, run: datetime, step: int, limit: asyncio.Semaphore
 ) -> list[tuple[int, bytes]]:
-    async with limit:
-        response = await client.get(_url(run, step, "index"))
-    response.raise_for_status()
-    rows = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    response = await _get(client, _url(run, step, "index"), limit)
+    try:
+        rows = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+    except ValueError as error:
+        raise WaveDataError(f"Run {run:%Y-%m-%d %H} UTC step {step} h has an unreadable index.") from error
     fields = [row for row in rows if row.get("param") == "swh" and row.get("type") == "pf"]
     if not fields:
         raise WaveDataError(f"Run {run:%Y-%m-%d %H} UTC step {step} h has no swh members.")
@@ -97,19 +115,13 @@ async def _swh_messages(
     async def fetch(row: dict[str, Any]) -> tuple[int, bytes]:
         start, length = int(row["_offset"]), int(row["_length"])
         for attempt in range(3):
-            try:
-                async with limit:
-                    data = await client.get(
-                        _url(run, step, "grib2"), headers={"Range": f"bytes={start}-{start + length - 1}"}
-                    )
-                data.raise_for_status()
-                if len(data.content) != length:
-                    raise WaveDataError("Truncated GRIB range.")
+            data = await _get(
+                client, _url(run, step, "grib2"), limit, {"Range": f"bytes={start}-{start + length - 1}"}
+            )
+            if len(data.content) == length:
                 return int(row["number"]), data.content
-            except (httpx.HTTPError, WaveDataError):
-                if attempt == 2:
-                    raise
-                await asyncio.sleep(1 + attempt)
+            if attempt == 2:
+                raise WaveDataError(f"Truncated GRIB range at step {step} h.")
         raise AssertionError("unreachable")
 
     return await asyncio.gather(*(fetch(row) for row in fields))
@@ -212,19 +224,22 @@ async def _main() -> None:
     from backend.store import DEFAULT_PATH, Store
 
     store = Store()
-    async with httpx.AsyncClient(timeout=60) as client:
-        run = await latest_complete_run(client, datetime.now(UTC))
-        if run is None:
-            raise SystemExit("No complete ECMWF waef run is published yet.")
-        print(f"Downloading ECMWF waef swh, run {run:%Y-%m-%d %H} UTC ...")
-        ensembles = await download_run(
-            run,
-            list(SITES.values()),
-            client,
-            on_step=lambda done, total: print(f"  step {done}/{total}", end="\r", flush=True),
-        )
-    for site_id, ensemble in ensembles.items():
-        store.save_waves(site_id, ensemble.run, ensemble.to_dict())
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            run = await latest_complete_run(client, datetime.now(UTC))
+            if run is None:
+                raise SystemExit("No complete ECMWF waef run is published yet.")
+            print(f"Downloading ECMWF waef swh, run {run:%Y-%m-%d %H} UTC ...")
+            ensembles = await download_run(
+                run,
+                list(SITES.values()),
+                client,
+                on_step=lambda done, total: print(f"  step {done}/{total}", end="\r", flush=True),
+            )
+        for site_id, ensemble in ensembles.items():
+            store.save_waves(site_id, ensemble.run, ensemble.to_dict())
+    finally:
+        store.close()
     print(f"\nSaved {len(ensembles)} sites to {DEFAULT_PATH}.")
 
 
