@@ -83,16 +83,16 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 
 ## D. Frontend and demo
 
-- [ ] [M] Planner layout: chat left, dashboard right, tool panel below.
-- [ ] [M] 21-day calendar: color by probability, hatching by confidence, days 16–21 as outlook.
-- [ ] [M] Day detail (ECharts): hourly timeline, limit bars, window, transit, daylight, limiting parameter, recalculation date.
-- [ ] [M] Render dashboard only from API tool results, never LLM JSON.
-- [ ] [M] Show every agent tool call in the tool panel.
+- [ ] [M] Planner layout: chat left, dashboard right, tool panel below. *Layout done; a job form stands in for chat until the agent lands.*
+- [x] [M] 21-day calendar: color by probability, hatching by confidence, days 16–21 as outlook.
+- [x] [M] Day detail (ECharts): hourly timeline, limit bars, window, transit, daylight, limiting parameter, recalculation date.
+- [x] [M] Render dashboard only from API tool results, never LLM JSON.
+- [ ] [M] Show every agent tool call in the tool panel. *Panel logs every UI API call (`frontend/src/lib/tool-log.ts`); agent calls to wire in once the chat endpoint exists.*
 - [ ] [M] Offline technician view: narrow layout, countdown to last return transfer, data age (green <6 h, yellow 6–12 h, >12 h informational only), chat.
 - [ ] [S] Daily brief: window/probability, current values vs. limits, 48/80 km lightning map, data age.
 - [ ] [S] Profile editor with default-value sources.
-- [ ] [M] Use Europe/Copenhagen; attribute DMI, ECMWF, Open-Meteo; show “decision support; captain decides”.
-- [ ] [M] Rename PWA manifest from “Offshore Weather” to Harbour Pulse, if retained.
+- [x] [M] Use Europe/Copenhagen; attribute DMI, ECMWF, Open-Meteo; show “decision support; captain decides”.
+- [x] [M] Rename PWA manifest from “Offshore Weather” to Harbour Pulse, if retained.
 - [ ] [M] Prepare a 3-minute demo from PLAN.md and a preloaded 4-day HR1 query.
 
 ## Pitch, README, submission

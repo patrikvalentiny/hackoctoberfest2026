@@ -13,11 +13,11 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['offshore.svg'],
       manifest: {
-        name: 'Offshore Weather',
-        short_name: 'Offshore Wx',
-        description: 'Offline marine forecast briefs for offshore teams.',
-        theme_color: '#0d3b43',
-        background_color: '#f5f8f7',
+        name: 'Harbour Pulse',
+        short_name: 'Harbour Pulse',
+        description: 'Work-window planning for offshore wind technicians.',
+        theme_color: '#0e5a6b',
+        background_color: '#eef2f1',
         display: 'standalone',
         orientation: 'any',
         icons: [
@@ -31,6 +31,17 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,webmanifest}'],
+        // Keep the Google Fonts files so the app looks the same offline.
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            },
+          },
+        ],
       },
     }),
   ],

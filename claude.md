@@ -19,10 +19,13 @@ procedures.
 - `backend/`: Python 3.14+, managed with `uv`; FastAPI and HTTPX.
 - `frontend/`: React 19, TypeScript, Vite, Tailwind CSS 4, shadcn/ui, and
   `pnpm`.
-- `frontend/src/lib/weather.ts`: API client and forecast/site types.
-- `frontend/src/lib/forecast-cache.ts`: IndexedDB forecast snapshots and
-  localStorage station profile.
-- `frontend/src/App.tsx`: station entry, network state, and forecast view.
+- `frontend/src/App.tsx`: planner layout (job form, dashboard, tool panel).
+- `frontend/src/lib/planner.ts`: typed client for the planner endpoints; every
+  call is recorded in `frontend/src/lib/tool-log.ts` for the tool panel.
+- `frontend/src/components/planner/`: 21-day calendar, ECharts day detail,
+  job form and tool panel. Dashboard data comes only from API results.
+- `frontend/src/lib/weather.ts`, `forecast-cache.ts`: older `/api/forecast`
+  client and IndexedDB cache, currently unused by the planner UI.
 - `frontend/vite.config.ts`: Vite aliases and PWA/service-worker configuration.
 - `backend/src/backend/main.py`: health and forecast endpoints; includes the
   planner router.

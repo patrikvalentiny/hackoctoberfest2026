@@ -28,10 +28,13 @@ limits, and procedures.
 - `backend/tests/` — mocked provider, engine and input-validation tests.
 - `backend/pyproject.toml` and `backend/uv.lock` — backend dependencies and
   Python requirement (`>=3.14`).
-- `frontend/src/App.tsx` — main forecast, station, connection, and summary UI.
-- `frontend/src/lib/weather.ts` — API URL, typed response model, and formatting.
-- `frontend/src/lib/forecast-cache.ts` — IndexedDB forecast cache and
-  localStorage station data.
+- `frontend/src/App.tsx` — planner layout: job form, dashboard, tool panel.
+- `frontend/src/lib/planner.ts` — typed planner API client; each call is logged
+  by `frontend/src/lib/tool-log.ts` for the tool panel.
+- `frontend/src/components/planner/` — calendar, ECharts day detail, job form,
+  tool panel. Dashboard data comes only from API results.
+- `frontend/src/lib/weather.ts`, `frontend/src/lib/forecast-cache.ts` — older
+  `/api/forecast` client and IndexedDB cache, unused by the planner UI.
 - `frontend/src/components/ui/` — reusable shadcn/ui components.
 - `frontend/vite.config.ts` — `@` alias and PWA/service-worker setup.
 - `frontend/package.json` and `frontend/pnpm-lock.yaml` — frontend scripts and

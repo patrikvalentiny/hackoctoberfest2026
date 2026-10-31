@@ -1,514 +1,208 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  Anchor,
-  ArrowClockwise,
-  CloudArrowDown,
-  Compass,
-  DownloadSimple,
-  MapPin,
-  Warning,
-  WaveSine,
-  WifiHigh,
-  WifiSlash,
-  Wind,
-} from '@phosphor-icons/react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { readForecast, readSavedStation, saveForecast, saveStation } from '@/lib/forecast-cache'
-import { fetchForecast, formatNumber, formatUtcTime, siteKey } from '@/lib/weather'
-import type { CachedForecast, SiteProfile, WeatherForecast } from '@/lib/weather'
+import { useEffect, useState } from 'react'
+import { ChatCircleDots, WifiHigh, WifiSlash } from '@phosphor-icons/react'
+import { Calendar } from '@/components/planner/Calendar'
+import { DayDetail } from '@/components/planner/DayDetail'
+import { JobForm } from '@/components/planner/JobForm'
+import { ToolPanel } from '@/components/planner/ToolPanel'
+import { cn } from '@/lib/utils'
+import { buildJobProfile, explainDay, findWindows } from '@/lib/planner'
+import type { DataAge, DayExplanation, Profile, ProfileRequest, Windows } from '@/lib/planner'
+import { dateTime } from '@/lib/format'
 
 function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : 'Something went wrong.'
 }
 
-function loadInitialStation() {
-  try {
-    return { station: readSavedStation(), error: '' }
-  } catch (error) {
-    return { station: undefined, error: messageFrom(error) }
-  }
+const freshnessText = {
+  fresh: 'Data fresh',
+  aging: 'Data aging',
+  stale: 'Data stale, for information only',
+} as const
+
+function DataAgeChip({ data }: { data: DataAge }) {
+  return (
+    <p
+      className={cn('age-chip inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm', `age-${data.freshness}`)}
+      title={`Fetched ${dateTime(data.fetched_at)}`}
+    >
+      <span className="age-dot size-2 rounded-full" aria-hidden />
+      {freshnessText[data.freshness]}, {data.age_hours} h old
+    </p>
+  )
 }
 
-function formatSavedAt(value: string) {
-  return new Intl.DateTimeFormat('en-GB', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value))
+function useOnline() {
+  const [online, setOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine)
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
+  return online
 }
 
 function App() {
-  const [initialStation] = useState(loadInitialStation)
-  const [site, setSite] = useState<SiteProfile | undefined>(initialStation.station)
-  const [name, setName] = useState(initialStation.station?.name ?? '')
-  const [latitude, setLatitude] = useState(
-    initialStation.station ? String(initialStation.station.latitude) : '',
-  )
-  const [longitude, setLongitude] = useState(
-    initialStation.station ? String(initialStation.station.longitude) : '',
-  )
-  const [forecast, setForecast] = useState<WeatherForecast>()
-  const [savedAt, setSavedAt] = useState<string>()
-  const [online, setOnline] = useState(navigator.onLine)
-  const [fetching, setFetching] = useState(false)
-  const [error, setError] = useState(initialStation.error)
+  const online = useOnline()
+  const [profile, setProfile] = useState<Profile>()
+  const [windows, setWindows] = useState<Windows>()
+  const [selected, setSelected] = useState<string>()
+  const [explanation, setExplanation] = useState<DayExplanation>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
-  const loadForecast = useCallback(async (profile: SiteProfile) => {
-    setFetching(true)
+  async function selectDay(profileId: string, date: string) {
+    setSelected(date)
     setError('')
-
     try {
-      const nextForecast = await fetchForecast(profile)
-      setForecast(nextForecast)
-      const saved = new Date().toISOString()
-      setSavedAt(saved)
-
-      try {
-        await saveForecast({
-          key: siteKey(profile),
-          saved_at: saved,
-          forecast: nextForecast,
-        })
-      } catch {
-        setError('Forecast updated, but this device could not save an offline copy.')
-      }
-    } catch (requestError) {
-      if (requestError instanceof TypeError) {
-        setOnline(false)
-        setError('Could not reach the forecast service. Showing any saved forecast.')
-      } else {
-        setError(messageFrom(requestError))
-      }
-    } finally {
-      setFetching(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    const updateConnection = () => setOnline(navigator.onLine)
-    window.addEventListener('online', updateConnection)
-    window.addEventListener('offline', updateConnection)
-
-    return () => {
-      window.removeEventListener('online', updateConnection)
-      window.removeEventListener('offline', updateConnection)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!site) return
-    let cancelled = false
-
-    void (async () => {
-      try {
-        const cached: CachedForecast | undefined = await readForecast(site)
-        if (cancelled) return
-        if (cached) {
-          setForecast(cached.forecast)
-          setSavedAt(cached.saved_at)
-        } else {
-          setForecast(undefined)
-          setSavedAt(undefined)
-        }
-        if (online) await loadForecast(site)
-        else if (!cached) setError('No saved forecast for this site. Connect to download one first.')
-      } catch (cacheError) {
-        if (!cancelled) setError(messageFrom(cacheError))
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [loadForecast, online, site])
-
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const profile: SiteProfile = {
-      name: name.trim(),
-      latitude: Number(latitude),
-      longitude: Number(longitude),
-    }
-    if (!profile.name || !Number.isFinite(profile.latitude) || !Number.isFinite(profile.longitude)) {
-      setError('Enter a station name and valid coordinates.')
-      return
-    }
-
-    try {
-      saveStation(profile)
-      setSite(profile)
-      setError('')
-    } catch (storageError) {
-      setError(messageFrom(storageError))
+      setExplanation(await explainDay(profileId, date))
+    } catch (failure) {
+      setExplanation(undefined)
+      setError(messageFrom(failure))
     }
   }
 
-  const outlook = useMemo(
-    () => forecast?.hours.slice(0, 25).filter((_, index) => index % 4 === 0) ?? [],
-    [forecast],
-  )
-  const maxWave = Math.max(0, ...outlook.map((hour) => hour.wave_height_m ?? 0))
-  const latest = forecast?.hours[0]
+  async function plan(request: ProfileRequest) {
+    setBusy(true)
+    setError('')
+    try {
+      const nextProfile = await buildJobProfile(request)
+      setProfile(nextProfile)
+      const nextWindows = await findWindows(nextProfile.profile_id)
+      setWindows(nextWindows)
+      const first = nextWindows.suggested_days[0] ?? nextWindows.days[0]?.date
+      setExplanation(undefined)
+      if (first) await selectDay(nextProfile.profile_id, first)
+    } catch (failure) {
+      setError(messageFrom(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
-    <div className="min-h-dvh bg-background text-foreground">
-      <header className="border-b border-border/80">
-        <div className="mx-auto flex min-h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Anchor aria-hidden="true" size={19} weight="bold" />
-            </div>
-            <div>
-              <p className="font-semibold tracking-tight">Offshore Weather</p>
-              <p className="text-xs text-muted-foreground">Field forecast brief</p>
-            </div>
-          </div>
-          <Badge variant={online ? 'secondary' : 'outline'} className="gap-1.5">
-            {online ? (
-              <WifiHigh aria-hidden="true" size={14} />
-            ) : (
-              <WifiSlash aria-hidden="true" size={14} />
-            )}
+    <div className="grid min-h-dvh grid-rows-[auto_1fr_auto] lg:h-dvh">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-6">
+        <div className="flex items-baseline gap-3">
+          <h1 className="font-display text-2xl font-bold tracking-tight">Harbour Pulse</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            Work windows for the Horns Rev wind farms
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {windows && <DataAgeChip data={windows.data} />}
+          <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+            {online ? <WifiHigh aria-hidden /> : <WifiSlash aria-hidden />}
             {online ? 'Online' : 'Offline'}
-          </Badge>
+          </p>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-12 lg:py-12">
-        <div className="min-w-0">
-          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-                <Compass aria-hidden="true" size={17} />
-                Offshore conditions
-              </p>
-              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                {site?.name || 'Weather brief'}
-              </h1>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {forecast
-                  ? `Forecast times in UTC. Data fetched ${formatSavedAt(forecast.fetched_at)}.`
-                  : 'Choose a site to load its marine forecast.'}
-              </p>
-            </div>
-            {site && (
-              <Button
-                onClick={() => void loadForecast(site)}
-                disabled={fetching || !online}
-                variant="outline"
-              >
-                <ArrowClockwise
-                  aria-hidden="true"
-                  className={fetching ? 'animate-spin' : ''}
-                  size={17}
-                />
-                Refresh forecast
-              </Button>
-            )}
-          </div>
-
-          {error && (
-            <div
-              role="alert"
-              className="mb-6 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
-            >
-              <Warning aria-hidden="true" className="mt-0.5 shrink-0" size={18} />
-              <p>{error}</p>
-            </div>
-          )}
-
-          {!online && forecast && (
-            <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-muted/60 p-4 text-sm">
-              <CloudArrowDown
-                aria-hidden="true"
-                className="mt-0.5 shrink-0 text-primary"
-                size={18}
-              />
-              <div>
-                <p className="font-medium">Showing a saved forecast</p>
-                <p className="mt-1 text-muted-foreground">
-                  Saved {savedAt ? formatSavedAt(savedAt) : 'on this device'}. Forecasts
-                  can become stale; verify conditions before use.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {fetching && !forecast && (
-            <div
-              aria-label="Loading forecast"
-              className="mb-8 grid gap-3 sm:grid-cols-2"
-            >
-              {[0, 1, 2, 3].map((item) => (
-                <div
-                  key={item}
-                  className="h-28 animate-pulse rounded-lg border border-border bg-muted/50"
-                />
-              ))}
-            </div>
-          )}
-
-          {forecast && latest ? (
-            <div className="space-y-8">
-              <section aria-labelledby="conditions-heading">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 id="conditions-heading" className="text-lg font-semibold">
-                    Marine conditions
-                  </h2>
-                  <span className="text-sm text-muted-foreground">
-                    {formatUtcTime(latest.time)} UTC
-                  </span>
-                </div>
-                <Card className="rounded-xl shadow-none">
-                  <CardContent className="grid grid-cols-2 gap-x-6 gap-y-7 p-5 sm:grid-cols-4 sm:p-6">
-                    <Metric
-                      icon={<WaveSine aria-hidden="true" size={19} />}
-                      label="Wave height"
-                      value={formatNumber(latest.wave_height_m)}
-                      unit="m"
-                    />
-                    <Metric
-                      icon={<WaveSine aria-hidden="true" size={19} />}
-                      label="Wave period"
-                      value={formatNumber(latest.wave_period_s)}
-                      unit="s"
-                    />
-                    <Metric
-                      icon={<Wind aria-hidden="true" size={19} />}
-                      label="Wind"
-                      value={formatNumber(latest.wind_speed_kn)}
-                      unit="kn"
-                    />
-                    <Metric
-                      icon={<Wind aria-hidden="true" size={19} />}
-                      label="Wind gusts"
-                      value={formatNumber(latest.wind_gusts_kn)}
-                      unit="kn"
-                    />
-                  </CardContent>
-                </Card>
-                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                  Forecast guidance only. It does not determine whether an offshore
-                  operation is safe. Follow approved procedures and current site
-                  limits.
-                </p>
-              </section>
-
-              <section aria-labelledby="outlook-heading">
-                <div className="mb-4 flex items-center justify-between gap-4">
-                  <h2 id="outlook-heading" className="text-lg font-semibold">
-                    Next 24 hours
-                  </h2>
-                  <span className="text-sm text-muted-foreground">
-                    Wave height, metres
-                  </span>
-                </div>
-                <Card className="rounded-xl shadow-none">
-                  <CardContent className="grid grid-cols-3 gap-x-3 gap-y-6 p-5 sm:grid-cols-6 sm:gap-5 sm:p-6">
-                    {outlook.map((hour) => {
-                      const height = hour.wave_height_m ?? 0
-                      const barHeight = maxWave > 0 ? Math.max(4, (height / maxWave) * 76) : 4
-                      return (
-                        <div
-                          key={hour.time}
-                          className="flex min-w-0 flex-col items-center gap-2"
-                        >
-                          <span className="text-xs text-muted-foreground">
-                            {formatUtcTime(hour.time)}
-                          </span>
-                          <div
-                            role="img"
-                            aria-label={`${formatUtcTime(hour.time)} UTC: ${formatNumber(hour.wave_height_m)} metres`}
-                            className="flex h-20 w-8 items-end overflow-hidden rounded-sm bg-muted"
-                          >
-                            <div
-                              className="w-full bg-primary"
-                              style={{ height: `${barHeight}px` }}
-                            />
-                          </div>
-                          <span className="text-sm font-medium">
-                            {formatNumber(hour.wave_height_m)}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatNumber(hour.wind_speed_kn, 0)} kn wind
-                          </span>
-                        </div>
-                      )
-                    })}
-                    {outlook.length === 0 && (
-                      <p className="col-span-full text-sm text-muted-foreground">
-                        No hourly outlook is available in this saved forecast.
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              </section>
-
-              <p className="text-xs text-muted-foreground">
-                Source:{' '}
-                <a
-                  className="underline underline-offset-4"
-                  href={forecast.source_url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  {forecast.source}
-                </a>
-                . Confirm conditions with approved marine forecasts and site procedures.
-              </p>
-            </div>
-          ) : !fetching ? (
-            <div className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 text-center">
-              <CloudArrowDown
-                aria-hidden="true"
-                className="mb-4 text-muted-foreground"
-                size={28}
-              />
-              <p className="font-medium">No forecast loaded</p>
-              <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-                Enter a named offshore site and coordinates. Download a forecast while
-                connected to keep a local copy for later.
-              </p>
-            </div>
-          ) : null}
-        </div>
-
-        <aside className="space-y-6 lg:pt-1">
-          <Card className="rounded-xl shadow-none">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <MapPin aria-hidden="true" className="text-primary" size={18} />
-                Forecast location
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-                <Field
-                  id="site-name"
-                  label="Site name"
-                  onChange={setName}
-                  placeholder="For example, North Sea platform"
-                  required
-                  value={name}
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <Field
-                    id="latitude"
-                    label="Latitude"
-                    max="90"
-                    min="-90"
-                    onChange={setLatitude}
-                    placeholder="56.0"
-                    required
-                    step="any"
-                    type="number"
-                    value={latitude}
-                  />
-                  <Field
-                    id="longitude"
-                    label="Longitude"
-                    max="180"
-                    min="-180"
-                    onChange={setLongitude}
-                    placeholder="2.0"
-                    required
-                    step="any"
-                    type="number"
-                    value={longitude}
-                  />
-                </div>
-                <Button className="w-full" disabled={fetching} type="submit">
-                  <DownloadSimple aria-hidden="true" size={17} />
-                  {fetching ? 'Loading forecast' : 'Load forecast'}
-                </Button>
-              </form>
-              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-                Coordinates are sent to Open-Meteo to retrieve weather and wave model
-                data. Check provider coverage for the selected location.
-              </p>
-            </CardContent>
-          </Card>
-
-          <div className="rounded-xl border border-border bg-muted/50 p-5">
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <CloudArrowDown aria-hidden="true" className="text-primary" size={17} />
-              Offline readiness
+      <main className="grid min-h-0 lg:grid-cols-[23rem_1fr] lg:grid-rows-[1fr_12rem]">
+        <aside className="agent-column border-b p-4 sm:p-6 lg:row-span-2 lg:overflow-y-auto lg:border-r lg:border-b-0">
+          <section aria-labelledby="agent-title" className="mb-6">
+            <h2 id="agent-title" className="font-display text-lg font-semibold">
+              Plan a job
             </h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              The app shell and saved forecasts stay on this device. Refresh forecasts
-              before leaving connectivity.
-            </p>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {savedAt
-                ? `Saved forecast: ${formatSavedAt(savedAt)}`
-                : 'No forecast saved for this site yet.'}
-            </p>
-          </div>
+            <div className="mt-3 flex gap-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+              <ChatCircleDots className="mt-0.5 size-5 shrink-0" aria-hidden />
+              <p>
+                The planning agent is not connected yet. Describe the job with the form; the
+                agent will fill in the same profile from a chat message.
+              </p>
+            </div>
+          </section>
+          <JobForm busy={busy} onSubmit={plan} />
+          {profile && (
+            <section aria-labelledby="limits-title" className="mt-6 text-sm">
+              <h2 id="limits-title" className="font-display text-base font-semibold">
+                Limits applied
+              </h2>
+              <ul className="mt-2 grid gap-2">
+                {profile.limits.map((limit) => (
+                  <li key={limit.id}>
+                    <span className="font-medium">
+                      {limit.label}: {limit.comparison === 'max' ? 'up to' : 'at least'} {limit.value}{' '}
+                      {limit.unit}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">{limit.source}</span>
+                  </li>
+                ))}
+              </ul>
+              <h3 className="mt-4 font-medium">Not evaluated</h3>
+              <ul className="mt-1 grid list-disc gap-1 pl-4 text-xs text-muted-foreground">
+                {profile.not_evaluated.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          )}
         </aside>
+
+        <section aria-label="Dashboard" className="min-w-0 p-4 sm:p-6 lg:overflow-y-auto">
+          {error && (
+            <p role="alert" className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          {windows && profile ? (
+            <div className="grid gap-8">
+              <section aria-labelledby="calendar-title">
+                <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 id="calendar-title" className="font-display text-xl font-semibold">
+                    {profile.site.name}, next 21 days
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {profile.vessel.toUpperCase()}, {profile.work_hours_per_day} h work
+                    {profile.transit_hours_each_way > 0 && ` + ${profile.transit_hours_each_way} h transit each way`},{' '}
+                    {profile.days_needed} {profile.days_needed === 1 ? 'day' : 'days'} needed
+                  </p>
+                </div>
+                <Calendar
+                  days={windows.days}
+                  suggested={windows.suggested_days}
+                  selected={selected}
+                  onSelect={(date) => selectDay(profile.profile_id, date)}
+                />
+                {windows.notes.length > 0 && (
+                  <ul className="mt-3 grid gap-1 text-xs text-muted-foreground">
+                    {windows.notes.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              {explanation && explanation.day.date === selected && (
+                <DayDetail explanation={explanation} transitHours={profile.transit_hours_each_way} />
+              )}
+            </div>
+          ) : (
+            <div className="grid h-full min-h-64 place-content-center text-center">
+              <p className="font-display text-2xl font-semibold">Which days can the team get out?</p>
+              <p className="mt-2 max-w-md text-muted-foreground">
+                Describe the job on the left. The engine checks wave height, wind, visibility and daylight for every hour of the next 21 days.
+              </p>
+            </div>
+          )}
+        </section>
+
+        <div className="min-h-56 border-t lg:col-start-2 lg:min-h-0">
+          <ToolPanel />
+        </div>
       </main>
-    </div>
-  )
-}
 
-function Metric({
-  icon,
-  label,
-  value,
-  unit,
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  unit: string
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-3 flex items-center gap-2 text-muted-foreground">
-        {icon}
-        <span className="text-xs sm:text-sm">{label}</span>
-      </div>
-      <p className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">
-        {value}
-        <span className="ml-1 text-sm font-normal text-muted-foreground">{unit}</span>
-      </p>
-    </div>
-  )
-}
-
-function Field({
-  id,
-  label,
-  onChange,
-  ...props
-}: {
-  id: string
-  label: string
-  onChange: (value: string) => void
-  value: string
-  type?: string
-  min?: string
-  max?: string
-  step?: string
-  placeholder?: string
-  required?: boolean
-}) {
-  return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium" htmlFor={id}>
-        {label}
-      </label>
-      <input
-        {...props}
-        className="flex h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        id={id}
-        onChange={(event) => onChange(event.target.value)}
-      />
+      <footer className="flex flex-wrap justify-between gap-x-6 gap-y-1 border-t px-4 py-2 text-xs text-muted-foreground sm:px-6">
+        <p>
+          Decision support only. The vessel master and team lead decide, using site-approved limits and
+          procedures.
+        </p>
+        <p>
+          Data: DMI, ECMWF and Open-Meteo, CC BY 4.0. Times in Europe/Copenhagen.
+        </p>
+      </footer>
     </div>
   )
 }
