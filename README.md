@@ -1,18 +1,22 @@
 # Offshore Weather
 
-An offline-first progressive web app for offshore marine forecast briefs.
+An offline-first progressive web app for offshore marine forecast briefs,
+being extended into Harbour Pulse, an open-source planning agent for offshore
+wind technicians (see [docs/PLAN.md](docs/PLAN.md) and
+[docs/TODO.md](docs/TODO.md)).
 
 ## Stack
 
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, shadcn/ui
 - **PWA and offline storage:** vite-plugin-pwa service worker, IndexedDB forecast snapshots
-- **Local summaries:** Transformers.js running Qwen 3 0.6B in a web worker, using WebGPU when available and WASM otherwise
 - **Backend:** FastAPI and HTTPX, combining Open-Meteo weather and marine forecast data
+- **Planner engine:** deterministic work-window and ensemble-probability calculations for Horns Rev 1–3 (see [backend/README.md](backend/README.md))
 
-The local model summarizes downloaded forecast values. It does not generate
-weather predictions or decide whether an operation is safe. Forecasts can be
+The planner computes work windows against default public limits. It supports
+planning only and never decides whether an operation is safe. Forecasts can be
 stale or inaccurate; follow approved marine sources, site limits, and operating
-procedures.
+procedures. A local Ollama agent that explains the planner results is planned
+but not yet built.
 
 ## Run locally
 
@@ -29,10 +33,9 @@ pnpm --dir frontend dev
 ```
 
 Open the Vite URL and enter an offshore site's name and coordinates. While
-online, load a forecast to save it on this device. The first local summary
-downloads model files; generate one online before going offline. Browser storage
-can be cleared by the device, so confirm that the forecast and model are cached
-before relying on offline access.
+online, load a forecast to save it on this device. Browser storage can be
+cleared by the device, so confirm that the forecast is cached before relying on
+offline access.
 
 Set `VITE_API_URL` in `frontend/.env.local` when the API is not at
 `http://localhost:8000`.

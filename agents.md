@@ -3,13 +3,15 @@
 ## Product context
 
 This repository contains Offshore Weather, an offline-first progressive web
-app for offshore technicians. The app displays weather and marine model
-forecasts and can summarize downloaded forecast values with a small model
-running locally in the browser.
+app for offshore technicians, being extended into Harbour Pulse
+(`docs/PLAN.md`, `docs/TODO.md`). The backend engine computes work windows and
+ensemble probabilities; a planned local Ollama agent will call tools and
+explain their results.
 
-**Safety boundary:** forecasts can be stale or inaccurate. The local model is
-for summarization only; it must not create or extrapolate forecasts, determine
-whether an operation is safe, or recommend that work proceed. Preserve the
+**Safety boundary:** forecasts can be stale or inaccurate. Any model only
+explains tool results; it must not create or extrapolate forecasts, change
+limits, determine whether an operation is safe, or recommend that work
+proceed. Preserve the
 prominent advisory language and direct users to approved forecasts, site
 limits, and procedures.
 
@@ -17,15 +19,19 @@ limits, and procedures.
 
 - `backend/src/backend/main.py` — FastAPI `/health` and `/api/forecast`
   endpoints; requests weather and marine data from Open-Meteo.
-- `backend/tests/test_weather.py` — mocked provider and input-validation tests.
+- `backend/src/backend/api/planner.py` — planner endpoints that mirror agent
+  tools; documented in `backend/README.md`.
+- `backend/src/backend/engine/` — profiles, default limits, windows,
+  probability and confidence (pure functions).
+- `backend/src/backend/ingest/open_meteo.py` — ensemble, marine and DMI
+  fetchers normalized into `SiteForecast`.
+- `backend/tests/` — mocked provider, engine and input-validation tests.
 - `backend/pyproject.toml` and `backend/uv.lock` — backend dependencies and
   Python requirement (`>=3.14`).
 - `frontend/src/App.tsx` — main forecast, station, connection, and summary UI.
 - `frontend/src/lib/weather.ts` — API URL, typed response model, and formatting.
 - `frontend/src/lib/forecast-cache.ts` — IndexedDB forecast cache and
   localStorage station data.
-- `frontend/src/workers/summary.worker.ts` — local Qwen 3 0.6B generation using
-  Transformers.js, WebGPU when available, and WASM otherwise.
 - `frontend/src/components/ui/` — reusable shadcn/ui components.
 - `frontend/vite.config.ts` — `@` alias and PWA/service-worker setup.
 - `frontend/package.json` and `frontend/pnpm-lock.yaml` — frontend scripts and
@@ -43,9 +49,12 @@ limits, and procedures.
 - The frontend stores forecast snapshots by coordinates in IndexedDB and
   remembers the active station in localStorage. Keep offline and stale-data
   states visible and honest.
-- The PWA precaches its app shell. ONNX WASM is runtime-cached on demand, and
-  Transformers.js browser caching is enabled for model files. First model use
-  requires connectivity; browser storage is not guaranteed to persist.
+- The PWA precaches its app shell; browser storage is not guaranteed to
+  persist.
+- Planner endpoints: `GET /api/sites`, `POST /api/profiles`,
+  `GET /api/profiles/{id}/windows`, `GET /api/profiles/{id}/days/{date}`,
+  `GET /api/profiles/{id}/task-fit`, `GET /api/data-status`. Missing values
+  count as limit failures; task-fit withholds timing for data over 12 h old.
 - `VITE_API_URL` overrides the frontend's default API base URL
   (`http://localhost:8000`). Backend CORS currently allows local Vite origins
   `localhost:5173` and `127.0.0.1:5173`.

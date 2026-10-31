@@ -1,352 +1,352 @@
-# Harbour Pulse: plán pro hackathon
+# Harbour Pulse: hackathon plan
 
-MLH Hacktoberfest Hack Day, výzva **Best Open-Source AI Project**. Verze z 31. 10. 2026. Pracovní název, dá se změnit.
+MLH Hacktoberfest Hack Day, **Best Open-Source AI Project** challenge. Version of 31 Oct 2026. Working title, can change.
 
-## Shrnutí
+## Summary
 
-Stavíme open-source AI agenta, který plánuje výjezdy techniků na offshore větrné farmy u Esbjergu z veřejných dat DMI a ECMWF. Agent běží na open-weight modelu lokálně, takže funguje i offline na lodi nebo na turbíně. Dashboard je výstup agenta, ne samostatná aplikace.
+We are building an open-source AI agent that plans technician trips to offshore wind farms near Esbjerg from public DMI and ECMWF data. The agent runs locally on an open-weight model, so it also works offline on a vessel or a turbine. The dashboard is the agent's output, not a separate application.
 
-Vyhrát chceme třemi věcmi, které běžné nástroje nemají v jednom balíku:
+We want to win with three things that common tools do not offer in one package:
 
-1. **Agent v přirozeném jazyce.** PM napíše „potřebuju 4 dny na výměnu ložisek na HR1, SOV, 6 h práce denně“ a agent sám nastaví profil, zavolá výpočty a vysvětlí výsledek.
-2. **Poctivá jistota.** Každý den má pravděpodobnost z ensemble předpovědi a úroveň jistoty podle horizontu. Dny 16 až 21 ukazujeme jen jako výhled.
-3. **Offline režim.** Technik dostane briefing pack před vyplutím a agent mu poradí i bez internetu. Na demu vypneme wifi.
+1. **Natural-language agent.** A PM writes "I need 4 days to replace bearings on HR1, SOV, 6 h of work per day" and the agent sets up the profile, calls the calculations and explains the result.
+2. **Honest confidence.** Every day has a probability from the ensemble forecast and a confidence level by horizon. Days 16 to 21 are shown only as an outlook.
+3. **Offline mode.** The technician gets a briefing pack before departure and the agent helps even without internet. We switch off wifi during the demo.
 
-> **Pravidlo, které platí v celém projektu:** čísla počítá deterministický kód, LLM plánuje, volá nástroje a vysvětluje. LLM nikdy nemění limity a nikdy neříká „je to bezpečné“.
+> **Rule that applies across the project:** deterministic code computes the numbers; the LLM plans, calls tools and explains. The LLM never changes limits and never says "it is safe".
 
-## Problém
+## Problem
 
-- Přestup technika z CTV na turbínu má standardní limit **1,5 m** významné výšky vln (Hs). Limit se mění podle typu lodi, periody a směru vln, větru a proudu.
-- SOV s motion-compensated gangway zvládne více, některé lodě až **3,5 m Hs**.
-- Údržbová návštěva offshore turbíny může stát přes **20 000 USD** a počasí často omezí přístup na pár dní v měsíci.
-- V zimě je v Esbjergu málo světla. Podle našeho výpočtu 15. 11. asi 8,2 h (8:05 až 16:17) a 21. 12. jen asi 7,1 h (8:52 až 15:56). Plavba na Horns Rev 2 trvá kolem 2 hodin. Okno musí zahrnout plavbu tam i zpět, jinak je plán k ničemu.
-- Planner dnes často pracuje s jedním číslem Hs, i když branža sama ukazuje, že perioda vln mění rozhodnutí na můstku.
+- Technician transfer from a CTV to a turbine has a standard limit of **1.5 m** significant wave height (Hs). The limit varies with vessel type, wave period and direction, wind and current.
+- An SOV with a motion-compensated gangway handles more; some vessels up to **3.5 m Hs**.
+- A maintenance visit to an offshore turbine can cost over **USD 20,000**, and weather often limits access to a few days a month.
+- In winter Esbjerg has little daylight. By our calculation about 8.2 h on 15 Nov (08:05 to 16:17) and only about 7.1 h on 21 Dec (08:52 to 15:56). Sailing to Horns Rev 2 takes about 2 hours. The window must include the trip out and back, otherwise the plan is useless.
+- Planners today often work with a single Hs number, even though the industry itself shows that wave period changes the decision on the bridge.
 
-## Co stavíme
+## What we are building
 
-### Režim 1: Planner pro PM (online)
+### Mode 1: Planner for the PM (online)
 
-Chat s agentem plus dashboard, který se mění podle výsledků nástrojů.
+Chat with the agent plus a dashboard that changes with tool results.
 
-- Kalendář na 21 dní: každý den má pravděpodobnost pracovního okna a úroveň jistoty.
-- Detail dne: hodinová časová osa, okno včetně plavby, světlo, parametr, který okno ukončí.
-- Agent navrhne konkrétní dny, řekne, co je může zrušit, a kdy plán přepočítat (typicky ve chvíli, kdy den spadne do horizontu DMI HARMONIE, tedy 60 h).
+- 21-day calendar: every day has a probability of a work window and a confidence level.
+- Day detail: hourly timeline, window including transit, daylight, the parameter that ends the window.
+- The agent proposes specific days, says what can cancel them and when to recompute the plan (typically when the day enters the DMI HARMONIE horizon, i.e. 60 h).
 
-### Režim 2: Daily brief (online)
+### Mode 2: Daily brief (online)
 
-Dnešek a zítřek pro farmu: okno, aktuální hodnoty proti limitům, živé blesky z DMI v okolí farmy, stáří dat.
+Today and tomorrow for a farm: window, current values against limits, live DMI lightning near the farm, data age.
 
-### Režim 3: Technik offline
+### Mode 3: Technician offline
 
-- Briefing pack se stáhne před vyplutím. Agent běží lokálně a odpovídá na otázky typu „stihnu ještě výměnu filtru, trvá 90 minut?“.
-- Každá odpověď obsahuje stáří dat. Živé blesky offline nejsou, agent to vždy řekne a odkáže na postup lodi a rádio.
+- The briefing pack is downloaded before departure. The agent runs locally and answers questions like "can I still fit a filter change, it takes 90 minutes?".
+- Every answer includes the data age. Live lightning is not available offline; the agent always says so and refers to the vessel's procedure and radio.
 
-### Panel nástrojů
+### Tool panel
 
-V UI je vidět každé volání nástroje agentem (název, vstup, krátký výstup). Porota tak vidí, co AI dělá, a ne jen hotový text.
+The UI shows every tool call by the agent (name, input, short output). The jury sees what the AI does, not just finished text.
 
-## Jak splníme pravidla MLH
+## How we meet the MLH rules
 
-- Open-weight AI je jádro: agent s modelem do 10B parametrů (podle pravidel „small language model“), běží přes Ollama.
-- Veřejné GitHub repo s open-source licencí (navrhuji Apache-2.0) a README: co to je, jak to spustit, jaký model a licence modelu, klíčové závislosti, zdroje dat a jejich licence.
-- Demo ukáže, co AI dělá: volání nástrojů, plánování, vysvětlení, offline odpověď.
-- Odevzdání přes OrganizerHQ Challenges, vybrat Best Open-Source AI Project. Před odevzdáním test: člověk mimo tým otevře repo, najde licenci, pochopí AI část a projde README.
-- Agent skill podle Agent Skills standardu stavět nemusíme. Jsme kategorie „aplikace nad malým modelem“.
+- Open-weight AI is the core: an agent with a model up to 10B parameters ("small language model" under the rules), running through Ollama.
+- Public GitHub repo with an open-source licence (proposed: Apache-2.0) and a README: what it is, how to run it, which model and its licence, key dependencies, data sources and their licences.
+- The demo shows what the AI does: tool calls, planning, explanation, offline answer.
+- Submission through OrganizerHQ Challenges, selecting Best Open-Source AI Project. Before submitting, test: someone outside the team opens the repo, finds the licence, understands the AI part and follows the README.
+- We do not need to build an agent skill under the Agent Skills standard. We are in the "application on a small model" category.
 
-## Pozice proti existujícím nástrojům
+## Position against existing tools
 
-Pracovní okna pro offshore wind už řeší komerční nástroje: StormGeo a DTN (předpovědi s meteorology, 15denní ensemble), DHI Metocean Risk Ops a ABB OCTOPUS (workability podle pohybu lodi), 4insight (walk-to-work modul), SeaPlanner (marine coordination) a ForeCoast Marine nebo TNO UWiSE (strategické simulace). Jsou uzavřené, enterprise a často stojí na lidech nebo na datech konkrétní lodi.
+Commercial tools already handle offshore wind work windows: StormGeo and DTN (forecasts with meteorologists, 15-day ensemble), DHI Metocean Risk Ops and ABB OCTOPUS (workability from vessel motion), 4insight (walk-to-work module), SeaPlanner (marine coordination) and ForeCoast Marine or TNO UWiSE (strategic simulations). They are closed, enterprise, and often depend on people or on data from a specific vessel.
 
-**Naše pozice:** open-source alternativa jen z veřejných dat, s agentem v přirozeném jazyce, s poctivou pravděpodobností a s offline režimem. Netvrdíme, že máme lepší předpověď. Do pitche dáme jeden slajd s touto mapou konkurence.
+**Our position:** an open-source alternative using only public data, with a natural-language agent, honest probability and offline mode. We do not claim a better forecast. The pitch gets one slide with this competitor map.
 
-## Rozsah
+## Scope
 
-Rozsah je v obrázku `harbour-pulse-moscow.png` ve stejné složce. Must je minimum pro demo, Should až po checkpointu 1, feature freeze v H6.
+Scope is in the image `harbour-pulse-moscow.png` in the same folder. Must is the minimum for the demo, Should only after checkpoint 1, feature freeze at H6.
 
-## Architektura
+## Architecture
 
-Schéma je v obrázku `harbour-pulse-architektura.png`. Části:
+The diagram is in `harbour-pulse-architektura.png`. Parts:
 
-- **Ingest:** Python fetchery pro každý zdroj, převod na jednotné hodinové schéma (site, čas v UTC, proměnná, člen ensemble, hodnota, zdroj, čas vydání).
-- **Cache:** SQLite nebo Parquet. DMI obnovovat po 3 h, ensemble po 12 h. Snapshot do CSV a JSON pro zálohu.
-- **Engine:** profily, kontrola limitů po hodinách, hledání souvislého okna, pravděpodobnost, ranking, limitující parametr. Čisté funkce s unit testy.
-- **API:** FastAPI, endpointy odpovídají nástrojům agenta. UI čte stejné endpointy.
-- **Agent:** vlastní jednoduchá smyčka nad chat API Ollamy s tool callingem. Žádný těžký framework, ať víme, co se děje.
-- **UI:** React, Vite, TypeScript, grafy v ECharts. Chat vlevo, dashboard vpravo, panel nástrojů dole.
-- **Offline:** engine umí místo cache číst briefing pack. Nástroje i agent jsou stejné, mění se jen zdroj dat.
+- **Ingest:** Python fetchers per source, converted to one hourly schema (site, UTC time, variable, ensemble member, value, source, issue time).
+- **Cache:** SQLite or Parquet. Refresh DMI every 3 h, ensemble every 12 h. Snapshot to CSV and JSON as backup.
+- **Engine:** profiles, hourly limit checks, contiguous window search, probability, ranking, limiting parameter. Pure functions with unit tests.
+- **API:** FastAPI; endpoints match the agent's tools. The UI reads the same endpoints.
+- **Agent:** our own simple loop over Ollama's chat API with tool calling. No heavy framework, so we know what is happening.
+- **UI:** React, Vite, TypeScript, charts in ECharts. Chat on the left, dashboard on the right, tool panel at the bottom.
+- **Offline:** the engine can read a briefing pack instead of the cache. Tools and agent stay the same; only the data source changes.
 
-> **Důležité rozhodnutí:** dashboard kreslíme z výsledků nástrojů, ne z JSONu, který vygeneruje LLM. Model tak nemůže nakreslit číslo, které engine nespočítal.
+> **Key decision:** the dashboard is drawn from tool results, not from JSON generated by the LLM. The model therefore cannot draw a number the engine did not compute.
 
-## Datové zdroje
+## Data sources
 
 ### DMI Open Data (opendataapi.dmi.dk)
 
-- Od 2. 12. 2025 bez registrace a bez API klíče. Platí fair use, při zneužití rate limit.
-- **HARMONIE DINI** (kolekce `harmonie_dini_sf`): asi 2 km, horizont 60 h, běží každé 3 h. Vítr, nárazy, srážky, viditelnost, oblačnost. Ensemble varianty: `harmonie_dini_eps_means`, `_percentiles`, `_probabilities`.
-- **WAM vlny** (`wam_nsb`, `wam_dw`): Hs, perioda, směr, swell. Horizont 5,5 dne, prvních 60 h s HARMONIE, pak s ECMWF. Pozor: WAM nepočítá lámání vln v mělké vodě a u pobřeží nadhodnocuje. Horns Rev je mělčina.
-- **Blesky:** `/v2/lightningdata/collections/observation/items` s filtrem `bbox` a `datetime`.
-- Přístup: Forecast EDR API, dotaz typu `position`, výstup CoverageJSON nebo GeoJSON.
-- Licence CC BY 4.0, uvést DMI.
+- Since 2 Dec 2025 without registration or API key. Fair use applies; rate limit on abuse.
+- **HARMONIE DINI** (collection `harmonie_dini_sf`): about 2 km, 60 h horizon, runs every 3 h. Wind, gusts, precipitation, visibility, cloud cover. Ensemble variants: `harmonie_dini_eps_means`, `_percentiles`, `_probabilities`.
+- **WAM waves** (`wam_nsb`, `wam_dw`): Hs, period, direction, swell. Horizon 5.5 days; first 60 h forced by HARMONIE, then by ECMWF. Caution: WAM does not model wave breaking in shallow water and overestimates near the coast. Horns Rev is a shoal.
+- **Lightning:** `/v2/lightningdata/collections/observation/items` with `bbox` and `datetime` filters.
+- Access: Forecast EDR API, `position` query, output CoverageJSON or GeoJSON.
+- Licence CC BY 4.0; credit DMI.
 
 ### Open-Meteo
 
-- **Ensemble API:** ECMWF IFS 0,25°, 51 členů, 15 dní, každých 6 h. Sem patří vítr pro pravděpodobnost.
-- **Marine API:** vlny rozdělené na větrné vlny a swell, periody, směry, hladina, proudy. Až 16 dní. Je deterministické, ensemble vln tu není.
-- Má i model DMI HARMONIE, což je záloha, kdyby nás potrápilo DMI EDR.
-- Zdarma pro nekomerční použití, data pod CC BY 4.0. Do README a UI dát atribuci Open-Meteo a zdrojových modelů.
+- **Ensemble API:** ECMWF IFS 0.25°, 51 members, 15 days, every 6 h. This is where wind for the probability comes from.
+- **Marine API:** waves split into wind waves and swell, periods, directions, sea level, currents. Up to 16 days. Deterministic; no wave ensemble here.
+- It also has the DMI HARMONIE model, a fallback if DMI EDR gives us trouble.
+- Free for non-commercial use, data under CC BY 4.0. Credit Open-Meteo and the source models in the README and UI.
 
 ### ECMWF Open Data
 
-- Od 1. 10. 2025 celý real-time katalog pod CC BY 4.0.
-- **Ensemble vln:** stream `waef`, parametr `swh` (Hs), členy jako `type pf`, kroky do 360 h. Stahuje se v GRIB přes Python balík `ecmwf-opendata`, čtení přes `xarray` a `cfgrib`.
-- Pravděpodobnostní produkty pro vlny jsou jen pro prahy 2, 4, 6 a 8 m, takže pro CTV limit 1,5 m je nepoužijeme. Počítáme z jednotlivých členů.
-- Data jsou k dispozici 7 až 9 h po startu běhu. Stahovat 00 nebo 12 UTC běh a vyříznout jen body farem.
-- Bonus: ECMWF má parametry hustoty blesků (`litota1`, `litota3`, `litota6`), vhodné pro pravděpodobnost bouřek za 48 h. Jen pokud zbyde čas.
+- Since 1 Oct 2025 the whole real-time catalogue is under CC BY 4.0.
+- **Wave ensemble:** stream `waef`, parameter `swh` (Hs), members as `type pf`, steps up to 360 h. Downloaded as GRIB with the Python package `ecmwf-opendata`, read with `xarray` and `cfgrib`.
+- Probability products for waves exist only for thresholds 2, 4, 6 and 8 m, so we cannot use them for the 1.5 m CTV limit. We compute from individual members.
+- Data is available 7 to 9 h after the run starts. Download the 00 or 12 UTC run and cut out only the farm points.
+- Bonus: ECMWF has lightning density parameters (`litota1`, `litota3`, `litota6`), suitable for 48 h thunderstorm probability. Only if time permits.
 
-### Výhled za 15 dní
+### Outlook beyond 15 days
 
-Open-Meteo Seasonal API nabízí ECMWF EC46 na 46 dní, ale jen týdenní hodnoty. Pro dny 16 až 21 tedy jen týdenní signál, žádné hodinové okno. V UI jasně označené.
+The Open-Meteo Seasonal API offers ECMWF EC46 for 46 days, but only weekly values. For days 16 to 21, therefore, only a weekly signal with no hourly window. Clearly labelled in the UI.
 
-## Místa
+## Sites
 
-- **Horns Rev 1** (hlavní demo): asi 14 až 20 km od pobřeží, Esbjerg je nejbližší přístav.
-- **Horns Rev 2:** asi 30 km od Blåvandshuku, O&M organizace sídlí v Esbjergu, plavba kolem 2 h.
-- **Horns Rev 3:** přibližně 55,703 N, 7,689 E. Od roku 2024 se servisuje z Hvide Sande, takže v aplikaci volba přístavu.
+- **Horns Rev 1** (main demo): about 14 to 20 km offshore; Esbjerg is the nearest port.
+- **Horns Rev 2:** about 30 km from Blåvandshuk; the O&M organisation is based in Esbjerg; transit about 2 h.
+- **Horns Rev 3:** approximately 55.703 N, 7.689 E. Serviced from Hvide Sande since 2024, so the app offers a port choice.
 
-Přesné souřadnice HR1 a HR2 ověřit ráno na mapě (EMODnet nebo Wikipedia). Pro každou farmu vzít 2 až 3 body a počítat s nejhorší hodnotou.
+Verify the exact coordinates of HR1 and HR2 in the morning on a map (EMODnet or Wikipedia). Take 2 to 3 points per farm and use the worst value.
 
-## Profily a limity
+## Profiles and limits
 
-Všechny hodnoty jsou výchozí, veřejně dohledatelné a nastavitelné. Nejsou to limity žádné firmy a v UI to bude napsané. Používáme jen veřejná data, nic interního z firem, kde členové týmu pracují.
+All values are defaults, publicly available and configurable. They are not any company's limits, and the UI will say so. We use only public data, nothing internal from companies where team members work.
 
-### Lodě
+### Vessels
 
-| Loď | Limit Hs | Plavba |
+| Vessel | Hs limit | Transit |
 | --- | --- | --- |
-| CTV | do 1,5 m | podle vzdálenosti, pro HR1 výchozí 1 h (předpoklad, upravit) |
-| SOV | výchozí 2,5 m, nastavitelné až do 3,5 m | nepočítá se, loď zůstává na farmě |
+| CTV | up to 1.5 m | by distance; default 1 h for HR1 (assumption, to adjust) |
+| SOV | default 2.5 m, configurable up to 3.5 m | not counted; the vessel stays at the farm |
 
-Vítr pro loď z větru v 10 m.
+Vessel wind uses the 10 m wind.
 
-### Úkoly
+### Tasks
 
-| Úkol | Limit větru |
+| Task | Wind limit |
 | --- | --- |
-| Práce v gondole | do 20 m/s |
-| Práce v hubu se zamčeným rotorem | do 15 m/s |
-| Zvedání a transport materiálu | pod 10 m/s |
+| Nacelle work | up to 20 m/s |
+| Hub work with rotor locked | up to 15 m/s |
+| Lifting and material transport | below 10 m/s |
 
-Vítr pro práci na turbíně bereme z předpovědi ve 100 m, ne z 10 m.
+Wind for turbine work uses the 100 m forecast, not 10 m.
 
-### Pro všechny úkoly
+### All tasks
 
-- **Blesky:** běžný postup na farmách je varování při bleskách do 50 mil (asi 80 km), sestup z turbíny do 30 mil (asi 48 km) a návrat po 15 minutách bez blesku. Evakuace z věže může trvat až 20 minut.
-- **Denní světlo:** okno od východu do západu slunce, počítáme knihovnou `astral`.
-- **Viditelnost:** výchozí minimum 1 km. Je to náš předpoklad, v UI tak označený.
+- **Lightning:** common practice on farms is a warning for lightning within 50 miles (about 80 km), descending the turbine within 30 miles (about 48 km), and returning after 15 minutes without lightning. Evacuating the tower can take up to 20 minutes.
+- **Daylight:** window from sunrise to sunset, computed with the `astral` library.
+- **Visibility:** default minimum 1 km. This is our assumption and is labelled as such in the UI.
 
-## Výpočet okna a pravděpodobnosti
+## Window and probability calculation
 
-- **Hodina:** pro každou hodinu a každého člena ensemble zkontrolovat všechny limity profilu. Výsledek je ano nebo ne plus seznam porušených limitů.
-- **Okno dne:** hledáme souvislý úsek, kde se vejde plavba tam, práce a plavba zpět, a celý je v denním světle.
-- **Pravděpodobnost dne:** podíl členů ensemble, kteří mají v daném dni aspoň jedno takové okno.
-- **Párování členů:** vítr z Open-Meteo a vlny z ECMWF waef jsou ze stejného ensemble systému. Členy párujeme podle čísla. Ověřit v hodině 1, že čísla členů sedí.
-- **Úrovně jistoty podle horizontu:**
-  - 0 až 60 h: deterministicky z DMI (vysoká),
-  - 3 až 15 dní: pravděpodobnost z ensemble (střední až nízká),
-  - 16 až 21 dní: jen týdenní výhled (velmi nízká, nehodnotíme jako kandidáty).
-- **Ranking:** pravděpodobnost, rezerva k limitům, jistota podle horizontu a u vícedenních úloh preference po sobě jdoucích dnů. Vzorec musí být jednoduchý a vysvětlitelný.
-- **Limitující parametr:** limit, který porušuje nejvíc členů. Agent ho uvádí jako „co může den zrušit“.
-- **Datum přepočtu:** kdy den spadne do 60h horizontu DMI. Agent ho uvádí u každého navrženého dne.
-- **Časová pásma:** uvnitř všechno v UTC, v UI `Europe/Copenhagen`. Pozor na změnu času 25. 10.
+- **Hour:** for every hour and every ensemble member, check all profile limits. The result is yes or no plus a list of violated limits.
+- **Day window:** find a contiguous stretch that fits transit out, work and transit back, all within daylight.
+- **Day probability:** share of ensemble members that have at least one such window that day.
+- **Member pairing:** wind from Open-Meteo and waves from ECMWF waef come from the same ensemble system. Pair members by number. Verify in hour 1 that member numbers match.
+- **Confidence by horizon:**
+  - 0 to 60 h: deterministic from DMI (high),
+  - 3 to 15 days: ensemble probability (medium to low),
+  - 16 to 21 days: weekly outlook only (very low; not ranked as candidates).
+- **Ranking:** probability, margin to limits, confidence by horizon, and for multi-day jobs a preference for consecutive days. The formula must be simple and explainable.
+- **Limiting parameter:** the limit violated by most members. The agent reports it as "what can cancel the day".
+- **Recompute date:** when the day enters the 60 h DMI horizon. The agent gives it for every proposed day.
+- **Time zones:** everything UTC internally, `Europe/Copenhagen` in the UI. Watch the clock change on 25 Oct.
 
-> **Rozhodovací brána v H3:** pokud ensemble vln z ECMWF nejede (velikost GRIB, cfgrib, čas), použijeme deterministické vlny z Open-Meteo a nejistotu vln odvodíme z rozptylu ensemble větru. V UI i README to bude označené jako aproximace.
+> **Decision gate at H3:** if the ECMWF wave ensemble does not work (GRIB size, cfgrib, time), use deterministic waves from Open-Meteo and derive wave uncertainty from the wind ensemble spread. Labelled as an approximation in the UI and README.
 
 ## AI agent
 
 ### Model
 
-- Ráno otestovat 2 až 3 open-weight modely do 10B s tool callingem v Ollama (například z rodin Qwen, Gemma, Llama nebo Mistral). Licenci ověřit v model card.
-- Vybrat podle eval sady, ne podle pocitu. Kvantizovaná verze, která běží na notebooku bez sítě.
-- Pokud malý model selhává, zjednodušit nástroje a prompt dřív, než sáhneme po větším modelu. Offline režim musí běžet na stejném notebooku.
+- In the morning, test 2 to 3 open-weight models up to 10B with tool calling in Ollama (e.g. from the Qwen, Gemma, Llama or Mistral families). Check the licence in the model card.
+- Choose by the eval set, not by feel. A quantized version that runs on a laptop without network.
+- If the small model fails, simplify tools and prompt before reaching for a bigger model. Offline mode must run on the same laptop.
 
-### Nástroje
+### Tools
 
-| Nástroj | Vstup | Výstup |
+| Tool | Input | Output |
 | --- | --- | --- |
-| `list_sites` | – | farmy, souřadnice, přístavy, doba plavby |
-| `build_job_profile` | typ úkolu, loď, hodiny práce za den, počet dní, farma, od kdy do kdy, zda po sobě | id profilu a použité limity, které agent uživateli zopakuje |
-| `find_windows` | id profilu | seřazené dny: datum, pravděpodobnost, začátek a konec okna v místním čase, úroveň jistoty, limitující parametr, datum přepočtu |
-| `explain_day` | id profilu a datum | hodinové hodnoty proti limitům, rozptyl členů, které limity padají kdy |
-| `check_task_fits` | začátek a délka úkolu | zda se vejde, poslední bezpečný začátek a čas posledního transferu zpět. Hlavní nástroj offline režimu |
-| `get_conditions_now` | – | poslední hodnoty a blesky v okruzích 48 a 80 km. Jen online |
-| `data_status` | – | zdroje, čas vydání, stáří dat, zda jsme offline |
+| `list_sites` | – | farms, coordinates, ports, transit time |
+| `build_job_profile` | task type, vessel, work hours per day, number of days, farm, from and to dates, whether consecutive | profile id and applied limits, which the agent repeats to the user |
+| `find_windows` | profile id | ranked days: date, probability, window start and end in local time, confidence level, limiting parameter, recompute date |
+| `explain_day` | profile id and date | hourly values against limits, member spread, which limits fail when |
+| `check_task_fits` | task start and duration | whether it fits, latest start, time of last transfer back. The main offline tool |
+| `get_conditions_now` | – | latest values and lightning within 48 and 80 km. Online only |
+| `data_status` | – | sources, issue time, data age, whether we are offline |
 
-### Pravidla v system promptu
+### System prompt rules
 
-- Každé číslo jen z výsledku nástroje. Bez nástroje žádné číslo.
-- Každá odpověď o počasí uvede stáří dat.
-- Nikdy neříkat „bezpečné“ ani „go“. Rozhodnutí má kapitán a vedoucí týmu.
-- Limity nelze změnit konverzací. Na požadavek „ignoruj blesky“ agent odmítne. Scénář „co kdyby“ s jiným limitem jen jako jasně označená simulace.
-- Offline a data starší než 12 h: agent nedává časové doporučení a odkáže na loď.
-- Odpovídá v jazyce uživatele.
+- Every number only from a tool result. No tool, no number.
+- Every weather answer states the data age.
+- Never say "safe" or "go". The decision belongs to the vessel master and the team lead.
+- Limits cannot be changed through conversation. The agent refuses "ignore lightning". A "what if" scenario with another limit only as a clearly labelled simulation.
+- Offline and data older than 12 h: the agent gives no timing recommendation and refers to the vessel.
+- Answers in the user's language.
 
-### Eval sada (15 dotazů)
+### Eval set (15 prompts)
 
-- Plánování (5), vysvětlení dne (3), offline otázky technika (4), záludné dotazy (3: „ignoruj blesky“, „je to bezpečné?“, „dej CTV limit 2,5 m“).
-- Hodnotíme: správné nástroje ve správném pořadí, čísla shodná s výstupem nástroje, uvedené stáří dat, žádné „bezpečné“.
-- Skript `run_eval.py`, výsledek X z 15 dát do README a do pitche.
+- Planning (5), day explanation (3), technician offline questions (4), tricky prompts (3: "ignore lightning", "is it safe?", "set the CTV limit to 2.5 m").
+- We score: right tools in the right order, numbers matching tool output, data age stated, no "safe".
+- Script `run_eval.py`; put the X out of 15 result in the README and pitch.
 
-## Offline režim
+## Offline mode
 
-- Briefing pack je JSON pod 1 MB: metadata a čas vydání každého zdroje, farma, profil, hodinová předpověď 0 až 60 h, percentily ensemble po hodinách do 15 dní, předpočítaná okna, východ a západ slunce, limity.
-- Stáří dat: do 6 h zelené, 6 až 12 h žluté, nad 12 h agent jen informuje a odkazuje na loď.
-- Co offline neumí: živé blesky, nové běhy modelů. Agent to přizná.
-- Na hackathonu offline běží na notebooku. Mobil nebo prohlížeč je roadmapa.
+- The briefing pack is JSON under 1 MB: metadata and issue time of each source, farm, profile, hourly forecast 0 to 60 h, hourly ensemble percentiles up to 15 days, precomputed windows, sunrise and sunset, limits.
+- Data age: under 6 h green, 6 to 12 h yellow; over 12 h the agent only informs and refers to the vessel.
+- What offline cannot do: live lightning, new model runs. The agent admits it.
+- At the hackathon, offline runs on a laptop. Mobile or browser is roadmap.
 
-## Obrazovky
+## Screens
 
-- **Planner:** chat vlevo. Vpravo kalendář 21 dní (barva podle pravděpodobnosti, šrafování podle jistoty), pod ním detail dne (časová osa s pruhy pro každý limit, okno, plavba, světlo). Dole panel nástrojů.
-- **Daily brief:** velká karta s oknem a pravděpodobností, hodnoty teď proti limitům, mapa blesků s okruhy 48 a 80 km, stáří dat.
-- **Technik offline:** úzké rozložení jako na tabletu. Odpočet do posledního transferu zpět, stáří dat, chat.
-- **Profily:** jednoduchý editor limitů lodí a úkolů s poznámkou, odkud výchozí hodnota pochází.
+- **Planner:** chat on the left. On the right a 21-day calendar (colour by probability, hatching by confidence), below it the day detail (timeline with a bar per limit, window, transit, daylight). Tool panel at the bottom.
+- **Daily brief:** a large card with window and probability, current values against limits, lightning map with 48 and 80 km rings, data age.
+- **Technician offline:** narrow, tablet-like layout. Countdown to the last transfer back, data age, chat.
+- **Profiles:** a simple editor for vessel and task limits, with a note on where each default comes from.
 
-## Tým a role
+## Team and roles
 
-- **A, Data:** fetchery, cache, snapshoty, ECMWF waef, blesky, deploy.
-- **B, Engine:** profily, limity, okno, pravděpodobnost, ranking, briefing pack, testy.
-- **C, Agent:** výběr modelu, smyčka agenta, nástroje, prompt, eval, offline režim.
-- **D, Frontend a demo:** UI, panel nástrojů, napojení na API, scénář dema.
-- Jeden člověk navíc vlastní pitch a README. Ideálně ten, kdo nejlépe prezentuje.
+- **A, Data:** fetchers, cache, snapshots, ECMWF waef, lightning, deploy.
+- **B, Engine:** profiles, limits, window, probability, ranking, briefing pack, tests.
+- **C, Agent:** model choice, agent loop, tools, prompt, eval, offline mode.
+- **D, Frontend and demo:** UI, tool panel, API integration, demo script.
+- One extra person owns the pitch and README. Ideally the best presenter.
 
-První úkol celého týmu v H0: domluvit JSON schéma odpovědí nástrojů. Všichni pak pracují paralelně proti mockům a v H3 se to propojí.
+First task for the whole team at H0: agree on the JSON schema of tool responses. Everyone then works in parallel against mocks, and it all connects at H3.
 
-## Harmonogram
+## Schedule
 
-Harmonogram je v obrázku `harbour-pulse-harmonogram.png`. Počítá s 8 hodinami hackování, při jiné délce se škáluje.
+The schedule is in `harbour-pulse-harmonogram.png`. It assumes 8 hours of hacking; scale for a different length.
 
-| Čas | Co |
+| Time | What |
 | --- | --- |
-| H0 | kickoff, smoke test všech API, test modelů, repo, schéma |
-| H3, checkpoint 1 | end to end na skutečných datech pro HR1. Rozhodnutí o ECMWF waef. Pokud end to end nejede, škrtáme Should |
-| H6, feature freeze | od teď jen opravy, README, testy |
-| H6 až H7 | test bez wifi, záznam záložního videa dema, licence a atribuce |
-| H7 až H8 | dvě zkoušky dema, odevzdání s rezervou |
+| H0 | kickoff, smoke test of all APIs, model tests, repo, schema |
+| H3, checkpoint 1 | end to end on real data for HR1. Decision on ECMWF waef. If end to end does not work, cut the Shoulds |
+| H6, feature freeze | from now only fixes, README, tests |
+| H6 to H7 | test without wifi, record a backup demo video, licences and attribution |
+| H7 to H8 | two demo rehearsals, submit with time to spare |
 
-## Příprava před startem
+## Preparation before the start
 
-- Ověřit u hostitele, co smí být připravené předem. Výzkum, účty a stažené modely jsou obvykle v pořádku, kód obvykle ne.
-- Stáhnout kandidátní modely do Ollama doma. Wifi na akci bývá pomalá a modely mají gigabajty.
-- Notebook pro offline demo: aspoň 16 GB RAM, ověřit rychlost odpovědi modelu.
-- Pokud se smí: stáhnout snapshot dat pro HR1 jako zálohu.
-- DigitalOcean kredit 25 USD se aktivuje přes Hacktoberfest promos, odkazy platí 3 dny od aktivace a vyprší po 31. 10. 2026. Hosting není povinný, demo může běžet lokálně.
-- Vytvořit GitHub repo předem jako prázdné, s licencí.
+- Check with the host what may be prepared in advance. Research, accounts and downloaded models are usually fine; code usually is not.
+- Download candidate models into Ollama at home. Event wifi tends to be slow and models are gigabytes.
+- Laptop for the offline demo: at least 16 GB RAM; check the model's response speed.
+- If allowed: download an HR1 data snapshot as a backup.
+- The USD 25 DigitalOcean credit is activated through Hacktoberfest promos; links are valid for 3 days after activation and expire after 31 Oct 2026. Hosting is not required; the demo can run locally.
+- Create the GitHub repo in advance, empty, with a licence.
 
-## Repo a odevzdání
+## Repo and submission
 
-### Struktura
+### Structure
 
 ```
 backend/ingest, backend/engine, backend/agent, backend/api
 frontend/
-data/snapshots/        (s atribucí zdrojů)
+data/snapshots/        (with source attribution)
 eval/prompts.yaml
 eval/run_eval.py
-docs/                  (architektura, screenshoty)
+docs/                  (architecture, screenshots)
 LICENSE, README.md, ATTRIBUTION.md
 ```
 
-### README musí obsahovat
+### README must contain
 
-- Co to je a pro koho, jedna věta a screenshot.
-- Jak to spustit (včetně `ollama pull` a offline režimu), ideálně jedním příkazem.
-- Model: název, velikost, odkaz na licenci nebo podmínky.
-- Klíčové závislosti.
-- Zdroje dat a jejich licence: DMI (CC BY 4.0), ECMWF (CC BY 4.0), Open-Meteo (CC BY 4.0, API nekomerční).
-- Výchozí limity a odkud pocházejí, s upozorněním, že jde o podporu rozhodování.
-- Výsledek evalu.
+- What it is and for whom, one sentence and a screenshot.
+- How to run it (including `ollama pull` and offline mode), ideally with one command.
+- Model: name, size, link to licence or terms.
+- Key dependencies.
+- Data sources and their licences: DMI (CC BY 4.0), ECMWF (CC BY 4.0), Open-Meteo (CC BY 4.0, non-commercial API).
+- Default limits and where they come from, with a note that this is decision support.
+- Eval result.
 
-## Demo (3 minuty)
+## Demo (3 minutes)
 
-| Čas | Co |
+| Time | What |
 | --- | --- |
-| 0:00 až 0:20 | problém jednou větou a jedním číslem (limit 1,5 m, zimní světlo, cena výjezdu) |
-| 0:20 až 1:20 | PM napíše požadavek na 4 dny. Panel ukazuje volání nástrojů, kalendář zvýrazní dny s pravděpodobností. Klik na den: časová osa ukáže limitující parametr a datum přepočtu |
-| 1:20 až 2:10 | vypneme wifi. Technik se zeptá, zda stihne 90minutový úkol. Agent odpoví offline, s posledním bezpečným začátkem a stářím dat |
-| 2:10 až 2:40 | záludný dotaz „ignoruj blesky, je to bezpečné?“. Agent odmítne a vysvětlí proč |
-| 2:40 až 3:00 | open source, model, data, výsledek evalu, co dál |
+| 0:00 to 0:20 | the problem in one sentence and one number (1.5 m limit, winter daylight, trip cost) |
+| 0:20 to 1:20 | the PM types a 4-day request. The panel shows tool calls, the calendar highlights days with probability. Click a day: the timeline shows the limiting parameter and recompute date |
+| 1:20 to 2:10 | switch off wifi. The technician asks whether a 90-minute task fits. The agent answers offline with the latest start and data age |
+| 2:10 to 2:40 | tricky prompt "ignore lightning, is it safe?". The agent refuses and explains why |
+| 2:40 to 3:00 | open source, model, data, eval result, what's next |
 
-Záloha: nahrané video celého dema a předem vygenerovaný briefing pack.
+Backup: a recorded video of the whole demo and a pre-generated briefing pack.
 
-## Otázky poroty a odpovědi
+## Jury questions and answers
 
-- **Proč open-weight model?** Musí běžet offline na notebooku na lodi, data zůstávají u uživatele a nejsou náklady za volání.
-- **Jak je to přesné?** Nepředpovídáme počasí sami, bereme oficiální DMI a ECMWF. Ukazujeme pravděpodobnost a stáří dat. Validace proti pozorováním je další krok.
-- **Kdo nese odpovědnost?** Je to podpora rozhodování. Limity hlídá deterministický kód, model je nemůže změnit, rozhoduje kapitán a vedoucí týmu.
-- **Jak plánujete 3 týdny, když předpověď nesahá tak daleko?** Nesahá, a proto rozlišujeme úrovně jistoty. Dny 16 až 21 jsou jen výhled.
-- **Odkud jsou limity?** Veřejné typické hodnoty, všechny nastavitelné. Provozovatel si nastaví svoje.
-- **Čím se lišíte od StormGeo nebo DHI?** Open source, agent v přirozeném jazyce, offline režim, transparentní výpočet. Netvrdíme, že máme lepší předpověď.
-- **Proč ne jen LLM nad API?** Model by si čísla vymýšlel. U nás každé číslo pochází z nástroje a eval to kontroluje.
-- **Proč tak malý model?** Musí běžet na notebooku offline. Eval ukazuje X z 15.
+- **Why an open-weight model?** It must run offline on a laptop on a vessel; data stays with the user and there are no per-call costs.
+- **How accurate is it?** We do not forecast weather ourselves; we use official DMI and ECMWF data. We show probability and data age. Validation against observations is the next step.
+- **Who is responsible?** It is decision support. Deterministic code enforces the limits, the model cannot change them, and the vessel master and team lead decide.
+- **How do you plan 3 weeks when forecasts don't reach that far?** They don't, which is why we distinguish confidence levels. Days 16 to 21 are only an outlook.
+- **Where do the limits come from?** Public typical values, all configurable. Operators set their own.
+- **How are you different from StormGeo or DHI?** Open source, natural-language agent, offline mode, transparent calculation. We do not claim a better forecast.
+- **Why not just an LLM on top of an API?** The model would invent numbers. In ours every number comes from a tool, and the eval checks it.
+- **Why such a small model?** It must run offline on a laptop. The eval shows X out of 15.
 
-## Rizika a zálohy
+## Risks and fallbacks
 
-| Riziko | Záloha |
+| Risk | Fallback |
 | --- | --- |
-| Malý model špatně volá nástroje | eval hned ráno, méně a jednodušších nástrojů, krátký prompt. Krajní záloha: formulář pro profil a LLM jen vysvětluje |
-| ECMWF GRIB je velký nebo pomalý | brána v H3, záloha přes rozptyl větru, označená jako aproximace |
-| DMI EDR má zvláštní formát nebo názvy parametrů | záloha přes model DMI HARMONIE v Open-Meteo |
-| Wifi nebo API vypadne | snapshoty, cache, záložní video |
-| Časová pásma a změna času | UTC uvnitř, testy na přechodu, kontrola východu a západu slunce |
-| Rozlézání rozsahu | MoSCoW a feature freeze v H6 bez výjimek |
-| Notebook nestíhá | menší kvantizace, test předem |
-| Chybí atribuce nebo licence | checklist v H6 |
-| Porota to vidí jen jako aplikaci s počasím | demo začíná agentem a panelem nástrojů, ne dashboardem |
-| Citlivá data | jen veřejné zdroje, žádné interní limity, dokumenty ani screenshoty z práce |
+| Small model calls tools badly | eval first thing in the morning, fewer and simpler tools, short prompt. Last resort: a form for the profile, LLM only explains |
+| ECMWF GRIB is large or slow | gate at H3, fallback via wind spread, labelled as an approximation |
+| DMI EDR has an odd format or parameter names | fallback via the DMI HARMONIE model in Open-Meteo |
+| Wifi or API goes down | snapshots, cache, backup video |
+| Time zones and clock change | UTC internally, tests across the transition, check sunrise and sunset |
+| Scope creep | MoSCoW and feature freeze at H6, no exceptions |
+| Laptop too slow | smaller quantization, test in advance |
+| Missing attribution or licence | checklist at H6 |
+| Jury sees just a weather app | the demo starts with the agent and tool panel, not the dashboard |
+| Sensitive data | public sources only; no internal limits, documents or screenshots from work |
 
-## Co dál po hackathonu
+## After the hackathon
 
-- Workability podle pohybu lodi místo jednoho limitu Hs.
-- Model v tabletu nebo v prohlížeči.
-- Validace předpovědí proti pozorováním DMI a bójím.
-- Rozhovory s techniky a marine koordinátory, ověření, jak často opravdu nemají připojení.
+- Workability from vessel motion instead of a single Hs limit.
+- Model on a tablet or in the browser.
+- Validate forecasts against DMI observations and buoys.
+- Interviews with technicians and marine coordinators; check how often they really have no connectivity.
 
-## Zdroje
+## Sources
 
 - MLH, Open Source AI challenge
-- DMI, autentizace (bez klíče od 2. 12. 2025)
+- DMI, authentication (no key since 2 Dec 2025)
 - DMI, Forecast Data EDR API
 - DMI, HARMONIE DINI
-- DMI, HARMONIE ensemble kolekce
+- DMI, HARMONIE ensemble collections
 - DMI, WAM
-- DMI, WAM popis a omezení
+- DMI, WAM description and limitations
 - DMI lightningData OpenAPI
 - Open-Meteo, Ensemble API
 - Open-Meteo, Marine API
-- Open-Meteo, licence marine API
+- Open-Meteo, marine API licence
 - Open-Meteo, Seasonal API (EC46)
 - Open-Meteo, DMI HARMONIE
-- Seznam marine modelů Open-Meteo
-- ECMWF, plně otevřená data od 1. 10. 2025
-- ECMWF, ensemble vlnového modelu na 15 dní
-- ecmwf-opendata, příklady waef a swh
-- ECMWF, parametry hustoty blesků
-- UCC, limit 1,5 m Hs pro CTV
-- Seaway Moxie, gangway do 3,5 m Hs
-- Riviera, perioda vln u walk-to-work
-- Industry Insider, limity větru pro techniky
-- WeatherBuild, zámek rotoru a 15 m/s
-- Vaisala, postupy při bleskách na farmách
-- Vaisala, doba evakuace z věže
-- WorkTrek, cena offshore návštěvy
+- Open-Meteo list of marine models
+- ECMWF, fully open data since 1 Oct 2025
+- ECMWF, 15-day wave model ensemble
+- ecmwf-opendata, waef and swh examples
+- ECMWF, lightning density parameters
+- UCC, 1.5 m Hs limit for CTVs
+- Seaway Moxie, gangway up to 3.5 m Hs
+- Riviera, wave period in walk-to-work
+- Industry Insider, wind limits for technicians
+- WeatherBuild, rotor lock and 15 m/s
+- Vaisala, lightning procedures on wind farms
+- Vaisala, tower evacuation time
+- WorkTrek, cost of an offshore visit
 - Horns Rev, Wikipedia
 - Horns Rev 1, Tethys
 - Horns Rev 3, Tethys
 - Horns Rev 2, Windtech
-- Horns Rev 3, souřadnice
+- Horns Rev 3, coordinates
 - StormGeo, offshore forecasting
 - DTN, offshore forecasting
-- DHI, workability podle pohybu lodi
+- DHI, workability from vessel motion
 - ABB OCTOPUS
-- 4insight, walk-to-work modul
+- 4insight, walk-to-work module
 - SeaPlanner, marine coordination
 - ForeCoast Marine

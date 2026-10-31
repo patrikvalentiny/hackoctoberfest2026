@@ -3,12 +3,14 @@
 ## What this project is
 
 Offshore Weather is an offline-first PWA for viewing offshore weather and
-marine forecast briefs. It combines provider data with a browser-local model
-that summarizes supplied forecast values. The model does not generate
-forecasts or assess operational safety.
+marine forecast briefs. It is being extended into Harbour Pulse, a planning
+agent for offshore wind technicians (`docs/PLAN.md`, `docs/TODO.md`). A
+deterministic backend engine computes work windows and probabilities; a
+planned local Ollama agent will only call tools and explain their results. No
+model may generate forecasts, change limits, or assess operational safety.
 
 Treat all forecasts as advisory and potentially stale. Do not describe the app
-or its AI summary as a source of operational approval or safety decisions.
+or its AI explanations as a source of operational approval or safety decisions.
 Users must follow approved marine forecasts, site limits, and operating
 procedures.
 
@@ -20,14 +22,17 @@ procedures.
 - `frontend/src/lib/weather.ts`: API client and forecast/site types.
 - `frontend/src/lib/forecast-cache.ts`: IndexedDB forecast snapshots and
   localStorage station profile.
-- `frontend/src/workers/summary.worker.ts`: Transformers.js Qwen 3 0.6B
-  summarization in a Web Worker; WebGPU is preferred when available, otherwise
-  WASM.
-- `frontend/src/App.tsx`: station entry, network state, forecast view, and
-  summary UI.
+- `frontend/src/App.tsx`: station entry, network state, and forecast view.
 - `frontend/vite.config.ts`: Vite aliases and PWA/service-worker configuration.
-- `backend/src/backend/main.py`: health and forecast endpoints.
-- `backend/tests/test_weather.py`: backend endpoint tests.
+- `backend/src/backend/main.py`: health and forecast endpoints; includes the
+  planner router.
+- `backend/src/backend/api/planner.py`: planner endpoints mirroring the agent
+  tools (sites, profiles, windows, day explanation, task fit, data status).
+- `backend/src/backend/engine/`: profiles and default limits, window search,
+  ensemble probability, confidence tiers. Pure functions.
+- `backend/src/backend/ingest/open_meteo.py`: Open-Meteo ensemble wind, ECMWF
+  WAM waves, DMI visibility and HARMONIE fetchers.
+- `backend/tests/`: endpoint, engine, and ingest tests.
 
 ## Data and offline behavior
 
@@ -37,11 +42,13 @@ procedures.
 - Forecast timestamps are UTC; wind speeds are knots, wave heights are metres,
   and visibility is metres. Forecast values may be `null`.
 - Forecast data is saved per coordinate in IndexedDB. The selected station is
-  stored in localStorage. The service worker precaches the app shell; ONNX WASM
-  is cached on demand. Transformers.js uses browser caching for model assets.
-- A first model run needs internet access to obtain model assets. Browser
-  storage may be evicted; do not claim offline model inference has been
-  verified unless it has been tested on the target browser/device.
+  stored in localStorage. The service worker precaches the app shell. Browser
+  storage may be evicted.
+- Planner endpoints use m/s winds and return times as UTC plus
+  Europe/Copenhagen local time. Wave heights come from one deterministic run,
+  so probabilities reflect wind ensemble spread only; keep that labelled.
+- Do not claim offline model inference has been verified unless it has been
+  tested on the target device.
 - Configure `VITE_API_URL` in `frontend/.env.local` when the API is not at
   `http://localhost:8000`. The backend currently allows local Vite origins on
   port 5173; update CORS deliberately for other deployment origins.
@@ -67,10 +74,10 @@ pnpm --dir frontend lint
 
 - Keep changes focused and follow existing TypeScript, Python, UI component,
   and error-reporting patterns.
-- Keep provider values and AI-generated prose clearly distinguishable. The
-  local model may summarize only supplied forecast values: do not make it
-  invent or extrapolate weather, classify conditions as safe, or recommend
-  whether operations should proceed.
+- Keep provider values, engine results and AI-generated prose clearly
+  distinguishable. Any model may only explain tool results: do not make it
+  invent or extrapolate weather, change limits, classify conditions as safe,
+  or recommend whether operations should proceed.
 - Preserve explicit units, UTC handling, nullable values, coordinate
   validation, offline cache behavior, and meaningful error states.
 - Do not silently substitute mock/default forecast data when a provider or

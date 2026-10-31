@@ -7,14 +7,17 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from backend.api.planner import router as planner_router
+
 app = FastAPI(title="Offshore Weather API")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(planner_router)
 
 
 class HealthResponse(BaseModel):

@@ -28,7 +28,7 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 
 ## H0: Kickoff (all)
 
-- [ ] [M] Decide app approach and whether to keep the browser Qwen worker.
+- [x] [M] Decide app approach and whether to keep the browser Qwen worker. *Extend backend, rebuild frontend; browser Qwen removed.*
 - [ ] [M] Define JSON schemas and mocks for all 7 tools and the briefing pack in `docs/schema/`.
 - [ ] [M] Agree on hourly ingest schema: site, UTC time, variable, ensemble member, value, source, issue time.
 - [ ] [M] Smoke-test DMI EDR (`harmonie_dini_sf`, `wam_nsb`), DMI lightning, Open-Meteo ensemble/marine/seasonal, and ECMWF `waef`.
@@ -39,15 +39,15 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 
 ## A. Data (ingest, cache)
 
-- [ ] [M] Create `backend/src/backend/{ingest,engine,agent,api}`; move `main.py` to `api/`.
-- [ ] [M] Fetch Open-Meteo Ensemble (ECMWF IFS 0.25°, 51 members, 15 days): 10 m/100 m wind in m/s.
-- [ ] [M] Extend Open-Meteo Marine to 16 days: Hs, period, direction, swell.
-- [ ] [M] Fetch DMI HARMONIE DINI (EDR `position`, CoverageJSON), 0–60 h: wind, gusts, visibility, precipitation. Fallback: HARMONIE via Open-Meteo.
+- [ ] [M] Create `backend/src/backend/{ingest,engine,agent,api}`; move `main.py` to `api/`. *`ingest`, `engine`, `api` exist; `main.py` stays put and includes the planner router; `agent` to do.*
+- [x] [M] Fetch Open-Meteo Ensemble (ECMWF IFS 0.25°, 51 members, 15 days): 10 m/100 m wind in m/s.
+- [x] [M] Extend Open-Meteo Marine to 16 days: Hs, period, direction, swell. *Planner uses `ecmwf_wam` (to ~15 days at HR1; the default model stops at ~8). Swell not yet fetched. Open-Meteo wave ensembles (`ecmwf_wam025_ensemble`, GEFS) return only nulls here.*
+- [ ] [M] Fetch DMI HARMONIE DINI (EDR `position`, CoverageJSON), 0–60 h: wind, gusts, visibility, precipitation. Fallback: HARMONIE via Open-Meteo. *Fallback in place: `dmi_harmonie_arome_europe` via Open-Meteo (wind 10/100 m, visibility). Direct EDR still to do.*
 - [ ] [S] Fetch DMI WAM (`wam_nsb` / `wam_dw`); note Horns Rev shallow-water limits.
 - [ ] [S] Fetch ECMWF `waef` / `swh` (ecmwf-opendata, xarray, cfgrib) at farm points; 00/12 UTC runs. **H3 gate.**
 - [ ] [M] Fetch DMI lightning by bbox/time; 48 and 80 km radii.
 - [ ] [S] Fetch Open-Meteo Seasonal (EC46); weekly signal for days 16–21.
-- [ ] [M] Cache in SQLite or Parquet; refresh DMI every 3 h, ensemble every 12 h; store source issue times.
+- [ ] [M] Cache in SQLite or Parquet; refresh DMI every 3 h, ensemble every 12 h; store source issue times. *In-memory 3 h cache only. Open-Meteo gives no run time, so age is from fetch time.*
 - [ ] [M] Save HR1 CSV/JSON demo fallback to `data/snapshots/`.
 - [ ] [M] Verify matching Open-Meteo wind and ECMWF wave ensemble members.
 - [ ] [C] Add ECMWF lightning density (`litota1/3/6`).
@@ -55,25 +55,25 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 
 ## B. Engine
 
-- [ ] [M] Model profiles: vessels (CTV 1.5 m, SOV 2.5 m, configurable to 3.5 m, transit); tasks (nacelle 20 m/s, hub 15 m/s, lifting 10 m/s); shared (lightning, daylight, 1 km visibility). Mark each value's source and “default, configurable” status.
-- [ ] [M] Add farms/ports (HR1/HR2 Esbjerg, HR3 Hvide Sande) and transit times.
-- [ ] [M] Check hourly limits per ensemble member: pass/fail + breached limits. Use 10 m vessel wind and 100 m turbine wind.
-- [ ] [M] Calculate daylight with `astral` (Europe/Copenhagen).
-- [ ] [M] Find continuous windows for outbound transit + work + return transit, all in daylight.
-- [ ] [M] Daily probability = share of members with a viable window.
-- [ ] [M] Confidence: high at 0–60 h (DMI), medium/low at 3–15 days, outlook only at 16–21 days.
-- [ ] [M] Show limiting parameter (most member breaches) and recalculation date (entry into 60 h horizon).
-- [ ] [S] Rank by probability, limit margin, confidence, and consecutive days; use a simple explainable formula.
-- [ ] [M] `check_task_fits`: latest safe start and return transfer.
+- [x] [M] Model profiles: vessels (CTV 1.5 m, SOV 2.5 m, configurable to 3.5 m, transit); tasks (nacelle 20 m/s, hub 15 m/s, lifting 10 m/s); shared (lightning, daylight, 1 km visibility). Mark each value's source and “default, configurable” status.
+- [x] [M] Add farms/ports (HR1/HR2 Esbjerg, HR3 Hvide Sande) and transit times. *HR1 1 h, HR2 2 h, HR3 1.5 h (assumption). Coordinates are approximate, flagged `coordinates_verified: false`.*
+- [x] [M] Check hourly limits per ensemble member: pass/fail + breached limits. Use 10 m vessel wind and 100 m turbine wind. *The plan gives no vessel wind limit value, so none is applied; 10 m wind is fetched and shown.*
+- [x] [M] Calculate daylight with `astral` (Europe/Copenhagen).
+- [x] [M] Find continuous windows for outbound transit + work + return transit, all in daylight.
+- [x] [M] Daily probability = share of members with a viable window.
+- [x] [M] Confidence: high at 0–60 h (DMI), medium/low at 3–15 days, outlook only at 16–21 days. *Split medium/low at 7 days. Outlook days have no data yet (EC46 to do).*
+- [x] [M] Show limiting parameter (most member breaches) and recalculation date (entry into 60 h horizon).
+- [ ] [S] Rank by probability, limit margin, confidence, and consecutive days; use a simple explainable formula. *Done except limit margin: probability, then confidence, then date; consecutive = best min-probability block.*
+- [x] [M] `check_task_fits`: latest start and last transfer back. *Uses DMI HARMONIE when it covers the period, else ensemble median; withholds timing over 12 h.*
 - [ ] [M] Keep briefing pack JSON under 1 MB: metadata, hourly 0–60 h, percentiles through day 15, precomputed windows, daylight, limits. Engine can use pack instead of cache.
 - [ ] [S] H3 fallback: estimate wave uncertainty from wind ensemble spread; label as approximate.
-- [ ] [M] Unit-test windows, probability, `null`s, DST change (Oct 25), sunrise/sunset.
+- [x] [M] Unit-test windows, probability, `null`s, DST change (Oct 25), sunrise/sunset.
 
 ## C. Agent
 
 - [ ] [M] Evaluate 2–3 offline, quantized Ollama models up to 10B; document name, size, license in README.
 - [ ] [M] Build a custom loop over Ollama chat API with tool calling (no framework).
-- [ ] [M] Expose tools as FastAPI endpoints and agent tools: `list_sites`, `build_job_profile`, `find_windows`, `explain_day`, `check_task_fits`, `get_conditions_now`, `data_status`.
+- [ ] [M] Expose tools as FastAPI endpoints and agent tools: `list_sites`, `build_job_profile`, `find_windows`, `explain_day`, `check_task_fits`, `get_conditions_now`, `data_status`. *Endpoints done for all but `get_conditions_now` (needs lightning); see `backend/README.md`. Agent tool wiring to do.*
 - [ ] [M] Chat endpoint returns response text and tool calls (name, input, short output) for the tool panel.
 - [ ] [M] System prompt: numbers only from tools; show data age; never say “safe”/“go”; conversation cannot change limits (“what-if” must be labeled simulation); if offline or data is >12 h old, give no time recommendation; reply in user's language.
 - [ ] [M] Offline agent uses the briefing pack; `get_conditions_now` reports that live lightning is unavailable.
@@ -99,7 +99,7 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 
 - [ ] [M] Rewrite `README.md`: purpose, screenshot, one-command setup (including `ollama pull` and offline mode), model/license, dependencies, data sources/licenses, default limits/sources, eval results.
 - [ ] [M] Add `ATTRIBUTION.md`: DMI and ECMWF (CC BY 4.0); Open-Meteo (CC BY 4.0, non-commercial API).
-- [ ] [M] Update `claude.md` and `agents.md`: replace browser-Qwen-only guidance after agent migration; retain safety rules.
+- [ ] [M] Update `claude.md` and `agents.md`: replace browser-Qwen-only guidance after agent migration; retain safety rules. *Browser model removed from both; rewrite again once the Ollama agent lands.*
 - [ ] [M] Add source URLs to PLAN.md.
 - [ ] [M] Add MoSCoW, architecture, and timeline diagrams to `docs/`.
 - [ ] [S] Add competitor map slide (StormGeo, DTN, DHI, ABB OCTOPUS, 4insight, SeaPlanner, ForeCoast, UWiSE).
