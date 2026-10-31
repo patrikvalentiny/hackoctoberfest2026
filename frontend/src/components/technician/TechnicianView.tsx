@@ -1,77 +1,23 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ArrowLeft, ArrowRight, Check, Clock, Compass, MapPin, Waves, Wind } from '@phosphor-icons/react'
+import { ArrowLeft, ArrowRight, ChatCircleDots, Check, Clock, Compass, MapPin, Waves, Wind } from '@phosphor-icons/react'
 import { ChatPanel } from '@/components/ChatPanel'
 import { WeatherOverview } from '@/components/WeatherOverview'
 import { cn } from '@/lib/utils'
 import { TIME_ZONE, weekday, dayMonth } from '@/lib/format'
 import type { CachedForecast } from '@/lib/weather'
 import type { SiteId } from '@/lib/planner'
+import {
+  formatTaskForecast,
+  taskForecastHours,
+  taskWindowLabel,
+  technicianTasks,
+} from '@/lib/technician-tasks'
 
 const sites = [
   { id: 'hr1', name: 'Horns Rev 1', short: 'HR1', latitude: 55.483, longitude: 7.833, port: 'Esbjerg' },
   { id: 'hr2', name: 'Horns Rev 2', short: 'HR2', latitude: 55.6, longitude: 7.583, port: 'Esbjerg' },
   { id: 'hr3', name: 'Horns Rev 3', short: 'HR3', latitude: 55.703, longitude: 7.689, port: 'Hvide Sande' },
 ] as const
-
-type SampleTask = {
-  id: string
-  time: string
-  duration: string
-  title: string
-  area: string
-  weatherWatch: string
-}
-
-const sampleTasks: SampleTask[] = [
-  {
-    id: 'transfer',
-    time: '07:30',
-    duration: '45 min',
-    title: 'Vessel transfer & turbine access',
-    area: 'Access',
-    weatherWatch: 'Wave height, period and vessel motion',
-  },
-  {
-    id: 'walkdown',
-    time: '08:30',
-    duration: '30 min',
-    title: 'Turbine condition walkdown',
-    area: 'Tower',
-    weatherWatch: 'Wind, rain and visibility on exposed areas',
-  },
-  {
-    id: 'drivetrain',
-    time: '09:15',
-    duration: '90 min',
-    title: 'Drivetrain & nacelle inspection',
-    area: 'Nacelle',
-    weatherWatch: 'Wind limits for work at height',
-  },
-  {
-    id: 'hydraulics',
-    time: '11:15',
-    duration: '75 min',
-    title: 'Hydraulic and cooling-system service',
-    area: 'Nacelle',
-    weatherWatch: 'Wind and safe access; follow task-specific procedures',
-  },
-  {
-    id: 'sensors',
-    time: '13:00',
-    duration: '60 min',
-    title: 'Control & condition-monitoring checks',
-    area: 'Nacelle',
-    weatherWatch: 'Stable access; check alarms and work permits',
-  },
-  {
-    id: 'return',
-    time: '15:00',
-    duration: '45 min',
-    title: 'Return transfer & close-out',
-    area: 'Access',
-    weatherWatch: 'Reassess sea state and vessel transfer conditions',
-  },
-]
 
 const TASK_STATE_KEY = 'harbour-pulse:sample-task-state'
 const SITE_KEY = 'harbour-pulse:technician-site'
@@ -130,7 +76,7 @@ function readTaskState(): Record<string, string[]> {
           Array.isArray(entry[1]) &&
           entry[1].every(
             (item): item is string =>
-              typeof item === 'string' && sampleTasks.some((task) => task.id === item),
+              typeof item === 'string' && technicianTasks.some((task) => task.id === item),
           ),
       ),
     )
@@ -139,13 +85,7 @@ function readTaskState(): Record<string, string[]> {
   }
 }
 
-function forecastContext(
-  siteName: string,
-  date: string,
-  tasks: SampleTask[],
-  completed: string[],
-  entry: CachedForecast | undefined,
-) {
+function forecastContext(siteName: string, date: string, completed: string[], entry: CachedForecast | undefined) {
   const hours = entry?.forecast.hours.filter(
     (hour) => localDate(new Date(hour.time).getTime()) === date,
   ) ?? []
@@ -160,7 +100,7 @@ function forecastContext(
   }))
   return [
     `Site: ${siteName}; work date: ${date}.`,
-    `The plan is a PoC sample, not a work order: ${tasks.map((task) => `${task.time} ${task.title} (${task.duration}; watch ${task.weatherWatch})`).join('; ')}.`,
+    `The plan is a PoC sample, not a work order: ${technicianTasks.map((task) => `${taskWindowLabel(task)} ${task.title} (${task.durationMinutes} min; watch ${task.weatherWatch})`).join('; ')}.`,
     `Tasks marked complete: ${completed.join(', ') || 'none'}.`,
     `Forecast coverage: ${weather.length} hourly points${weather.length < 24 ? ', partial day only' : ', full 24 hours'}.`,
     `Hourly forecast points: ${JSON.stringify(weather)}.`,
@@ -169,12 +109,12 @@ function forecastContext(
   ].join('\n')
 }
 
-function taskState(task: SampleTask, date: string, today: string, now: number, done: boolean) {
+function taskState(task: (typeof technicianTasks)[number], date: string, today: string, now: number, done: boolean) {
   if (done) return 'Complete'
   if (date !== today) return 'Planned'
   const [hours, minutes] = task.time.split(':').map(Number)
   const start = hours * 60 + minutes
-  const finish = start + Number.parseInt(task.duration, 10)
+  const finish = start + task.durationMinutes
   const current = localMinute(now)
   if (current >= start && current < finish) return 'In progress'
   return current >= finish ? 'Next shift' : 'Upcoming'
@@ -195,6 +135,8 @@ export function TechnicianView({
   const [selectedDate, setSelectedDate] = useState(() => readSelectedDate(now))
   const [completedByDay, setCompletedByDay] = useState(readTaskState)
   const [forecastEntry, setForecastEntry] = useState<CachedForecast>()
+  const [taskQuestion, setTaskQuestion] = useState<{ id: number; question: string }>()
+  const [taskQuestionId, setTaskQuestionId] = useState(0)
   const site = sites.find((item) => item.id === siteId) ?? sites[0]
   const today = localDate(now)
   const completed = useMemo(
@@ -210,11 +152,12 @@ export function TechnicianView({
     setForecastEntry(entry)
   }, [])
   const context = useMemo(
-    () => forecastContext(site.name, selectedDate, sampleTasks, completed, forecastEntry),
+    () => forecastContext(site.name, selectedDate, completed, forecastEntry),
     [completed, forecastEntry, selectedDate, site.name],
   )
 
   function changeSite(value: SiteId) {
+    setTaskQuestion(undefined)
     setSiteId(value)
     setForecastEntry(undefined)
     try {
@@ -226,12 +169,29 @@ export function TechnicianView({
 
   function changeDate(value: string) {
     if (value < today || value > shiftDate(today, 2)) return
+    setTaskQuestion(undefined)
     setSelectedDate(value)
     try {
       localStorage.setItem(DATE_KEY, value)
     } catch {
       // The selected work date remains active until reload.
     }
+  }
+
+  function askAboutTask(task: (typeof technicianTasks)[number]) {
+    const matchingHours = taskForecastHours(task, selectedDate, forecastEntry?.forecast.hours ?? [])
+    const readings = matchingHours.length
+      ? matchingHours.map(formatTaskForecast).join('; ')
+      : 'No hourly forecast data covers this task window.'
+    const question = [
+      `For ${task.title} at ${site.name} on ${selectedDate}, scheduled ${taskWindowLabel(task)} local (${task.durationMinutes} minutes),`,
+      'what hourly forecast points overlap this task window, and what possible weather-related issues should I watch for?',
+      `Focus on ${task.weatherWatch}. Forecast points: ${readings}`,
+      'State any coverage gaps. Do not invent limits or give a go/no-go decision.',
+    ].join(' ')
+    const id = taskQuestionId + 1
+    setTaskQuestionId(id)
+    setTaskQuestion({ id, question })
   }
 
   function toggleTask(id: string) {
@@ -349,6 +309,7 @@ export function TechnicianView({
           <WeatherOverview
             key={siteId}
             site={site}
+            tasks={technicianTasks}
             siteId={site.id}
             online={online}
             now={now}
@@ -367,15 +328,19 @@ export function TechnicianView({
               </div>
               <p className="inline-flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground">
                 <Check className="size-3.5" aria-hidden />
-                {tasksComplete}/{sampleTasks.length} complete
+                {tasksComplete}/{technicianTasks.length} complete
               </p>
             </div>
 
             <ol className="mt-4 grid gap-2">
-              {sampleTasks.map((task) => {
+              {technicianTasks.map((task) => {
                 const done = completed.includes(task.id)
                 const state = taskState(task, selectedDate, today, now, done)
                 const active = state === 'In progress'
+                const taskHours = taskForecastHours(task, selectedDate, forecastEntry?.forecast.hours ?? [])
+                const taskConditions = taskHours.length
+                  ? taskHours.map(formatTaskForecast).join(' · ')
+                  : 'No hourly forecast data for this scheduled window.'
                 return (
                   <li
                     key={task.id}
@@ -400,17 +365,31 @@ export function TechnicianView({
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {task.area} · {task.duration} · Weather watch: {task.weatherWatch}
+                        {task.area} · {task.durationMinutes} min · Weather watch: {task.weatherWatch}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-foreground/75">
+                        <span className="font-medium">Hourly forecast overlapping task:</span> {taskConditions}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleTask(task.id)}
-                      aria-pressed={done}
-                      className="min-h-9 rounded-md border px-3 text-xs font-medium outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/50"
-                    >
-                      {done ? 'Mark pending' : 'Mark complete'}
-                    </button>
+                    <div className="flex flex-wrap gap-2 sm:flex-col">
+                      <button
+                        type="button"
+                        onClick={() => askAboutTask(task)}
+                        aria-label={`Ask about ${task.title} and its weather conditions`}
+                        className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-primary/30 px-3 text-xs font-medium text-primary outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        <ChatCircleDots className="size-4" aria-hidden />
+                        Ask about conditions
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleTask(task.id)}
+                        aria-pressed={done}
+                        className="min-h-9 rounded-md border px-3 text-xs font-medium outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        {done ? 'Mark pending' : 'Mark complete'}
+                      </button>
+                    </div>
                   </li>
                 )
               })}
@@ -446,6 +425,7 @@ export function TechnicianView({
             siteId={siteId}
             date={selectedDate}
             context={context}
+            questionRequest={taskQuestion}
           />
           <section className="rounded-xl border bg-card p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3">
@@ -456,9 +436,9 @@ export function TechnicianView({
               <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">{dataLabel}</span>
             </div>
             <dl className="mt-4 grid grid-cols-2 gap-3">
-              <Snapshot label="Planned activities" value={`${sampleTasks.length}`} />
+              <Snapshot label="Planned activities" value={`${technicianTasks.length}`} />
               <Snapshot label="Forecast hours" value={hours.length ? `${hours.length} hourly points` : 'Not downloaded'} />
-              <Snapshot label="Completed" value={`${tasksComplete} of ${sampleTasks.length}`} />
+              <Snapshot label="Completed" value={`${tasksComplete} of ${technicianTasks.length}`} />
               <Snapshot label="Data source" value={forecastEntry?.forecast.source ?? 'Waiting for forecast'} />
             </dl>
             <p className="mt-3 flex items-start gap-2 border-t pt-3 text-xs leading-relaxed text-muted-foreground">

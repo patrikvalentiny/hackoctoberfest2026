@@ -36,10 +36,12 @@ export function ChatPanel({
   siteId,
   date,
   context,
+  questionRequest,
 }: {
   siteId: string
   date: string
   context: string
+  questionRequest?: { id: number; question: string }
 }) {
   const key = storageKey(siteId, date)
   const [messages, setMessages] = useState<AgentMessage[]>(() => readMessages(key))
@@ -48,6 +50,8 @@ export function ChatPanel({
   const [error, setError] = useState('')
   const [progress, setProgress] = useState('')
   const list = useRef<HTMLDivElement>(null)
+  const section = useRef<HTMLElement>(null)
+  const textarea = useRef<HTMLTextAreaElement>(null)
 
   function persistMessages(next: AgentMessage[]) {
     try {
@@ -60,6 +64,20 @@ export function ChatPanel({
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight })
   }, [messages, busy])
+
+  useEffect(() => {
+    if (!questionRequest) return
+    const frame = window.requestAnimationFrame(() => {
+      setDraft(questionRequest.question)
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      section.current?.scrollIntoView({
+        behavior: reducedMotion ? 'auto' : 'smooth',
+        block: 'center',
+      })
+      textarea.current?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [questionRequest])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -93,7 +111,7 @@ export function ChatPanel({
   }
 
   return (
-    <section aria-labelledby="field-chat-title" className="chat-panel min-h-[24rem]">
+    <section ref={section} aria-labelledby="field-chat-title" className="chat-panel min-h-[24rem]">
       <header className="flex items-start justify-between gap-3 border-b border-border/70 px-4 py-3">
         <div className="flex items-center gap-3">
           <span className="grid size-9 place-items-center rounded-md bg-secondary text-primary">
@@ -167,6 +185,7 @@ export function ChatPanel({
         <label className="sr-only" htmlFor={`field-chat-${siteId}-${date}`}>Ask about the selected workday</label>
         <div className="flex items-end gap-2">
           <textarea
+            ref={textarea}
             id={`field-chat-${siteId}-${date}`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

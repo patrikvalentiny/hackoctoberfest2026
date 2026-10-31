@@ -5,6 +5,12 @@ import type { SiteId } from '@/lib/planner'
 import { downloadOfflineForecast, OFFLINE_FORECAST_HOURS, readOfflineForecast } from '@/lib/offline-forecast'
 import { generateLocalSummary } from '@/lib/local-ai'
 import { TIME_ZONE } from '@/lib/format'
+import {
+  formatTaskForecast,
+  taskForecastHours,
+  taskWindowLabel,
+  type TechnicianTask,
+} from '@/lib/technician-tasks'
 import { Button } from '@/components/ui/button'
 
 function DailyMetric({
@@ -53,6 +59,7 @@ function summaryPrompt(
   siteName: string,
   date: string,
   hours: ForecastHour[],
+  tasks: TechnicianTask[],
 ) {
   const table = hours.map((hour) => ({
     time_local: hourLabel(hour.time),
@@ -63,19 +70,33 @@ function summaryPrompt(
     visibility_m: hour.visibility_m,
     precipitation_probability_pct: hour.precipitation_probability_pct,
   }))
+  const taskWindows = tasks.map((task) => {
+    const matchingHours = taskForecastHours(task, date, hours)
+    return {
+      task: task.title,
+      scheduled_local: taskWindowLabel(task),
+      duration_minutes: task.durationMinutes,
+      weather_watch: task.weatherWatch,
+      forecast_during_task: matchingHours.length
+        ? matchingHours.map(formatTaskForecast)
+        : 'No hourly forecast data covers this scheduled task window.',
+    }
+  })
   return [
     `Summarize this hourly forecast for ${siteName} on ${date}.`,
-    'Write 2–4 short sentences: overall conditions and the timing of any meaningful changes.',
+    'Write a concise day brief that explicitly considers every scheduled task and hourly forecast points overlapping each task window. Explain plausible weather impacts and timing, and identify tasks with no overlapping forecast data.',
     'Summarize only the supplied forecast hours. If coverage is partial, say so and do not imply these are all 24 hours.',
+    'Do not match hourly forecast points from outside a task’s scheduled window to that task.',
     'Mention weather factors that may affect vessel access or maintenance, but do not invent operating thresholds or claim a threshold crossing.',
     'Wind readings are at 10 m and must not be compared to any 100 m work limit.',
     'Do not make a go/no-go decision. State that this is a forecast, not an observation.',
-    JSON.stringify({ hourly_forecast: table }),
+    JSON.stringify({ scheduled_tasks: taskWindows, hourly_forecast: table }),
   ].join('\n')
 }
 
 export function WeatherOverview({
   site,
+  tasks,
   siteId: suppliedSiteId,
   online,
   now,
@@ -85,6 +106,7 @@ export function WeatherOverview({
   onForecastEntry,
 }: {
   site: SiteProfile & { id: SiteId }
+  tasks: TechnicianTask[]
   siteId?: SiteId
   online: boolean
   now: number
@@ -185,7 +207,7 @@ export function WeatherOverview({
         throw new Error(`The saved forecast has no hourly data for ${selectedDate}. Refresh the 3-day forecast.`)
       }
       const result = await generateLocalSummary(
-        summaryPrompt(site.name, selectedDate, hours),
+        summaryPrompt(site.name, selectedDate, hours, tasks),
         (progress) => {
           const percentage = Math.round(progress.progress * 100)
           setSummaryProgress(
@@ -287,7 +309,8 @@ export function WeatherOverview({
         </div>
 
         <p className="mt-2 text-xs text-muted-foreground">
-          First use downloads the model. WebGPU is required; summary inference runs in this browser.
+          The summary compares each planned task with overlapping hourly conditions and flags data gaps.
+          First use downloads the model; WebGPU is required.
         </p>
         {summaryProgress && (
           <p role="status" className="mt-3 text-xs text-muted-foreground">

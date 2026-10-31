@@ -29,6 +29,7 @@ export async function generateLocalSummary(
     [{ role: 'user', content: prompt }],
     'Summarize the supplied offshore forecast data. Be concise and factual.',
     onProgress,
+    600,
   )
 }
 
@@ -36,6 +37,7 @@ export async function generateLocalChatReply(
   messages: { role: 'user' | 'assistant'; content: string }[],
   context: string,
   onProgress: (progress: InitProgressReport) => void,
+  maxTokens = 220,
 ): Promise<string> {
   if (!('gpu' in navigator)) {
     throw new Error('This browser does not support WebGPU, which Harbour Pulse needs for local AI.')
@@ -52,7 +54,7 @@ export async function generateLocalChatReply(
       ...messages,
     ],
     temperature: 0.2,
-    max_tokens: 220,
+    max_tokens: maxTokens,
   })
   const answer = response.choices[0]?.message.content
   if (typeof answer !== 'string' || !answer.trim()) {

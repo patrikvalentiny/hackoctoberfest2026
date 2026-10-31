@@ -10,7 +10,10 @@ Install dependencies with `pnpm install`, then run `pnpm dev`. The forecast API 
 
 The Conditions view saves the next 72 hours of hourly forecast data in IndexedDB for offline use.
 Use **Summarize locally** to load the WebLLM model into a browser worker and generate a daily
-summary on-device. The first model load requires WebGPU and a one-time model download; subsequent
+summary on-device. The summary includes the scheduled sample tasks and compares each task window
+with overlapping hourly forecast points, noting when data is missing or coverage is partial.
+Each task also has **Ask about conditions**, which pre-fills the local chat with that task, its
+scheduled window, and the matching forecast points. The first model load requires WebGPU and a one-time model download; subsequent
 use can work without a connection when the browser retains the model and saved forecast data.
 Forecast summaries are decision support only, not observations or go/no-go advice.
 
