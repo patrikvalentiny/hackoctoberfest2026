@@ -88,7 +88,7 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 - [x] [M] Day detail (ECharts): hourly timeline, limit bars, window, transit, daylight, limiting parameter, recalculation date.
 - [x] [M] Render dashboard only from API tool results, never LLM JSON.
 - [ ] [M] Show every agent tool call in the tool panel. *Panel logs every UI API call (`frontend/src/lib/tool-log.ts`); agent calls to wire in once the chat endpoint exists.*
-- [ ] [M] Offline technician view: narrow layout, countdown to last return transfer, data age (green <6 h, yellow 6–12 h, >12 h informational only), chat.
+- [ ] [M] Offline technician view: narrow layout, countdown to last return transfer, data age (green <6 h, yellow 6–12 h, >12 h informational only), chat. *Done except chat: last `/task-fit` result is kept in localStorage so the countdown and data age work without a connection; a new task check still needs the local backend.*
 - [ ] [S] Daily brief: window/probability, current values vs. limits, 48/80 km lightning map, data age.
 - [ ] [S] Profile editor with default-value sources.
 - [x] [M] Use Europe/Copenhagen; attribute DMI, ECMWF, Open-Meteo; show “decision support; captain decides”.

@@ -24,6 +24,9 @@ procedures.
   call is recorded in `frontend/src/lib/tool-log.ts` for the tool panel.
 - `frontend/src/components/planner/`: 21-day calendar, ECharts day detail,
   job form and tool panel. Dashboard data comes only from API results.
+- `frontend/src/components/technician/`: narrow technician view, countdown
+  to the last transfer back and task-fit check; keeps the last result in
+  localStorage for offline use.
 - `frontend/src/lib/weather.ts`, `forecast-cache.ts`: older `/api/forecast`
   client and IndexedDB cache, currently unused by the planner UI.
 - `frontend/vite.config.ts`: Vite aliases and PWA/service-worker configuration.

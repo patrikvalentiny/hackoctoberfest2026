@@ -276,6 +276,19 @@ body {
   height: 100%;
 }
 
+.countdown {
+  background: var(--depth-5);
+  color: var(--depth-ink-dark);
+}
+.fit-yes {
+  border-color: var(--fresh);
+  background: color-mix(in srgb, var(--fresh) 10%, transparent);
+}
+.fit-no {
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 10%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .day-tile { transition: none; }
 }

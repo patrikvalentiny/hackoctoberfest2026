@@ -33,6 +33,8 @@ limits, and procedures.
   by `frontend/src/lib/tool-log.ts` for the tool panel.
 - `frontend/src/components/planner/` — calendar, ECharts day detail, job form,
   tool panel. Dashboard data comes only from API results.
+- `frontend/src/components/technician/` — technician view: countdown to the
+  last transfer back, task-fit check, last result kept in localStorage.
 - `frontend/src/lib/weather.ts`, `frontend/src/lib/forecast-cache.ts` — older
   `/api/forecast` client and IndexedDB cache, unused by the planner UI.
 - `frontend/src/components/ui/` — reusable shadcn/ui components.
