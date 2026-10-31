@@ -47,6 +47,7 @@ function useOnline() {
 
 function App() {
   const online = useOnline()
+  const localAiReady = 'gpu' in navigator
   const [realNow, setRealNow] = useState(() => Date.now())
   const [demoClock, setDemoClock] = useState(readDemoClock)
   const now = simulatedNow(realNow, demoClock)
@@ -98,6 +99,10 @@ function App() {
             <span className={online ? 'size-2 rounded-full bg-emerald-400' : 'size-2 rounded-full bg-amber-300'} aria-hidden />
             {online ? <WifiHigh aria-hidden /> : <WifiSlash aria-hidden />}
             {online ? 'Connected' : 'Offline'}
+          </p>
+          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-medium tracking-wide text-white/80 uppercase">
+            <span className={localAiReady ? 'size-2 rounded-full bg-cyan-400' : 'size-2 rounded-full bg-amber-300'} aria-hidden />
+            {localAiReady ? 'Local AI ready' : 'WebGPU required'}
           </p>
         </div>
       </header>
