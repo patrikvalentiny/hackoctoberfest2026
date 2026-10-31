@@ -183,11 +183,12 @@ export function TechnicianView({
     const readings = matchingHours.length
       ? matchingHours.map(formatTaskForecast).join('; ')
       : 'No hourly forecast data covers this task window.'
+    // The readings are already listed on the task card; ask only for a short plain read of them.
     const question = [
-      `For ${task.title} at ${site.name} on ${selectedDate}, scheduled ${taskWindowLabel(task)} local (${task.durationMinutes} minutes),`,
-      'what hourly forecast points overlap this task window, and what possible weather-related issues should I watch for?',
-      `Focus on ${task.weatherWatch}. Forecast points: ${readings}`,
-      'State any coverage gaps. Do not invent limits or give a go/no-go decision.',
+      `How does the weather look for ${task.title} at ${site.name}, ${selectedDate} ${taskWindowLabel(task)} local?`,
+      `Forecast: ${readings}.`,
+      `Answer in 2 short, plain sentences, mentioning ${task.weatherWatch.toLowerCase()}.`,
+      'Use only these numbers with their units; do not list them all again or guess at storms or causes.',
     ].join(' ')
     const id = taskQuestionId + 1
     setTaskQuestionId(id)

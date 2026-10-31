@@ -6,7 +6,6 @@ import { downloadOfflineForecast, OFFLINE_FORECAST_HOURS, readOfflineForecast } 
 import { generateLocalSummary } from '@/lib/local-ai'
 import { TIME_ZONE } from '@/lib/format'
 import {
-  formatTaskForecast,
   taskForecastHours,
   taskWindowLabel,
   type TechnicianTask,
@@ -56,46 +55,47 @@ function rangeOf(values: (number | null)[]) {
   return valid.length ? { min: Math.min(...valid), max: Math.max(...valid) } : undefined
 }
 
+// Readings as short, pre-computed facts: a 1B model copes with a few lines of
+// plain text far better than with raw JSON tables.
+function readings(hours: ForecastHour[]) {
+  const span = (values: (number | null)[], unit: string, digits: number, scale = 1) => {
+    const range = rangeOf(values.map((value) => (value === null ? null : value / scale)))
+    if (!range) return undefined
+    const [min, max] = [range.min.toFixed(digits), range.max.toFixed(digits)]
+    return min === max ? `${min} ${unit}` : `${min}–${max} ${unit}`
+  }
+  const gusts = rangeOf(hours.map((hour) => hour.wind_gusts_kn))
+  const rain = rangeOf(hours.map((hour) => hour.precipitation_probability_pct))
+  const parts = [
+    ['wind', span(hours.map((hour) => hour.wind_speed_kn), 'kn', 0)],
+    ['gusts up to', gusts && `${gusts.max.toFixed(0)} kn`],
+    ['waves', span(hours.map((hour) => hour.wave_height_m), 'm', 1)],
+    ['visibility', span(hours.map((hour) => hour.visibility_m), 'km', 0, 1000)],
+    ['rain chance up to', rain && `${rain.max.toFixed(0)}%`],
+  ].filter((part): part is [string, string] => part[1] !== undefined)
+  return parts.length ? parts.map(([label, value]) => `${label} ${value}`).join(', ') : 'no readings'
+}
+
 function summaryPrompt(
   siteName: string,
   date: string,
   hours: ForecastHour[],
   tasks: TechnicianTask[],
 ) {
-  const table = hours.map((hour) => ({
-    time_local: hourLabel(hour.time),
-    wind_10m_kn: hour.wind_speed_kn,
-    gust_10m_kn: hour.wind_gusts_kn,
-    significant_waves_m: hour.wave_height_m,
-    wave_period_s: hour.wave_period_s,
-    visibility_m: hour.visibility_m,
-    precipitation_probability_pct: hour.precipitation_probability_pct,
-  }))
-  const taskWindows = tasks.map((task) => {
-    const matchingHours = taskForecastHours(task, date, hours)
-    return {
-      task: task.title,
-      scheduled_local: taskWindowLabel(task),
-      duration_minutes: task.durationMinutes,
-      weather_watch: task.weatherWatch,
-      forecast_during_task: matchingHours.length
-        ? matchingHours.map(formatTaskForecast)
-        : 'No hourly forecast data covers this scheduled task window.',
-    }
+  const coverage = `${hourLabel(hours[0].time)}–${hourLabel(hours.at(-1)!.time)}`
+  const taskLines = tasks.map((task) => {
+    const matching = taskForecastHours(task, date, hours)
+    return `- ${taskWindowLabel(task)} ${task.title}: ${matching.length ? readings(matching) : 'no forecast data'}`
   })
   return [
-    `Summarize this hourly forecast for ${siteName} on ${date}.`,
-    'Reply in exactly this plain-text format, with no title and no other sections:',
-    'Overview: one sentence on overall wind, waves and visibility.',
-    'Changes:',
-    '- HH:MM – one meaningful change, with its value and unit',
-    '(at most 4 change lines; skip small or flat changes; write "- None" if nothing changes meaningfully)',
-    'Watch: one sentence on factors that may affect vessel access or maintenance.',
-    'Use the units in the field names: wind and gusts in kn, waves in m, period in s, visibility in m, precipitation in %.',
-    'Summarize only the supplied forecast hours. If coverage is partial, say so in the overview.',
-    'Do not invent operating thresholds or claim a threshold crossing. Wind readings are at 10 m and must not be compared to any 100 m work limit.',
-    'Do not make a go/no-go decision.',
-    JSON.stringify({ hourly_forecast: table }),
+    `Forecast for ${siteName} on ${date}, hours ${coverage} local time.`,
+    `Whole day: ${readings(hours)}.`,
+    'Planned tasks:',
+    ...taskLines,
+    '',
+    'Write 2 or 3 short, plain sentences for the crew about this day.',
+    'Say how the weather looks overall and name the one task or time with the roughest weather, if any.',
+    'Use only the numbers above, with their units. Wind is at 10 m. No lists, no headings, no limits, no go/no-go.',
   ].join('\n')
 }
 
