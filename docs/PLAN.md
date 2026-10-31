@@ -2,6 +2,11 @@
 
 MLH Hacktoberfest Hack Day, **Best Open-Source AI Project** challenge. Version of 31 Oct 2026. Working title, can change.
 
+> **Current PoC direction:** the shipped interface is a technician-only dashboard with a selectable
+> workday, sample task plan, 72-hour forecast cache, and browser-local WebLLM chat/summary. The
+> planner UI and tool-call panel described below are historical design notes, not current frontend
+> behavior. See [the frontend README](../frontend/README.md) for current usage and safety caveats.
+
 ## Summary
 
 We are building an open-source AI agent that plans technician trips to offshore wind farms near Esbjerg from public DMI and ECMWF data. The agent runs locally on an open-weight model, so it also works offline on a vessel or a turbine. The dashboard is the agent's output, not a separate application.

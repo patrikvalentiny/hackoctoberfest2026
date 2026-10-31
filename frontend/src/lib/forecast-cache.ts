@@ -20,12 +20,16 @@ function openDatabase(): Promise<IDBDatabase> {
 export async function readForecast(
   site: Pick<SiteProfile, 'latitude' | 'longitude'>,
 ): Promise<CachedForecast | undefined> {
+  return readForecastByKey(siteKey(site))
+}
+
+export async function readForecastByKey(key: string): Promise<CachedForecast | undefined> {
   const database = await openDatabase()
   return new Promise((resolve, reject) => {
     const request = database
       .transaction(storeName, 'readonly')
       .objectStore(storeName)
-      .get(siteKey(site))
+      .get(key)
 
     request.onsuccess = () => {
       database.close()

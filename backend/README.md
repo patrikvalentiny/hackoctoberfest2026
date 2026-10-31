@@ -13,12 +13,13 @@ metres. Forecast availability and coverage depend on the provider.
 
 ## Planner endpoints
 
-These mirror the Harbour Pulse agent tools (see `docs/PLAN.md`). Planner winds
-are m/s; every time is returned as `{"utc": ..., "local": ...}` with local time
-in `Europe/Copenhagen`. Every response includes `data` with the data age,
+These planning APIs support the backend calculation engine; the current
+technician frontend does not expose a planner UI or agent tool calls. Planner
+winds are m/s; every time is returned as `{"utc": ..., "local": ...}` with local
+time in `Europe/Copenhagen`. Every response includes `data` with the data age,
 freshness (`fresh` < 6 h, `aging` 6–12 h, `stale` > 12 h) and offline state.
 
-| Endpoint | Tool | What it returns |
+| Endpoint | Operation | What it returns |
 | --- | --- | --- |
 | `GET /api/sites` | `list_sites` | Horns Rev 1–3, ports, CTV transit hours |
 | `POST /api/profiles` | `build_job_profile` | profile id and the limits applied |
@@ -78,14 +79,17 @@ $env:HARBOUR_PULSE_WAEF = "0"; uv run --directory backend fastapi dev src/backen
 ### Offline mode
 
 A briefing pack (< 1 MB) holds the profile, its limits and the full hourly
-forecast, so every tool works unchanged without a network. Download one from
+forecast, so planner endpoints work unchanged without a network. Download one from
 `/api/profiles/{id}/briefing-pack`, or save a demo pack for HR1:
 
 ```powershell
 uv run --directory backend python -m backend.snapshot hr1
 ```
 
-Load it with `POST /api/briefing-pack`, or at startup:
+The frontend saves the pack in IndexedDB when a brief is downloaded. When the
+browser detects that it is offline, it loads the pack into the local API with
+`POST /api/briefing-pack`. Keep the local API running for offline planner API
+use. The pack can also be loaded manually or at startup:
 
 ```powershell
 $env:HARBOUR_PULSE_PACK = "data/snapshots/<file>.json"; uv run --directory backend fastapi dev src/backend/main.py

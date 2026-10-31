@@ -1,5 +1,3 @@
-import { finishCall, startCall } from '@/lib/tool-log'
-
 // Types mirror the serializers in backend/src/backend/api/planner.py.
 
 export type SiteId = 'hr1' | 'hr2' | 'hr3'
@@ -65,6 +63,7 @@ export type DataAge = {
   fetched_at: Instant
   age_hours: number
   freshness: Freshness
+  offline?: boolean
 }
 
 export type Day = {
@@ -137,96 +136,35 @@ export type DataStatus = {
   notes: string[]
 }
 
-const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
-
-async function call<T>(
-  tool: string,
-  input: unknown,
-  path: string,
-  summarize: (result: T) => string,
-  init?: RequestInit,
-): Promise<T> {
-  const id = startCall(tool, input)
-  try {
-    const response = await fetch(`${apiUrl}${path}`, init)
-    if (!response.ok) {
-      let message = `${tool} failed (HTTP ${response.status}).`
-      try {
-        const body: { detail?: unknown } = await response.json()
-        if (typeof body.detail === 'string') message = body.detail
-      } catch {
-        // Keep the HTTP status message when the server did not return JSON.
-      }
-      throw new Error(message)
-    }
-    const result = (await response.json()) as T
-    finishCall(id, 'ok', summarize(result))
-    return result
-  } catch (error) {
-    const message =
-      error instanceof TypeError
-        ? 'Planner API is unreachable. Start the backend or check the connection.'
-        : error instanceof Error
-          ? error.message
-          : 'Unknown error.'
-    finishCall(id, 'error', message)
-    throw new Error(message, { cause: error })
+export type CurrentConditions = {
+  site_id: SiteId
+  profile_id: string | null
+  limits_from: string
+  data: DataAge & { offline: boolean }
+  forecast_now: {
+    time: Instant
+    reference: string
+    values: Record<string, number | null>
+    limits: {
+      id: string
+      label: string
+      value: number | null
+      limit: number
+      unit: string
+      comparison: 'max' | 'min'
+      within_limit: boolean | null
+    }[]
+  } | null
+  forecast_note: string
+  lightning: {
+    available: boolean
+    note?: string
+    strikes_within_48km?: number
+    strikes_within_80km?: number
   }
 }
 
-export function listSites() {
-  return call<{ sites: Site[] }>('list_sites', {}, '/api/sites', (r) => `${r.sites.length} sites`)
-}
-
-export function buildJobProfile(request: ProfileRequest) {
-  return call<Profile>(
-    'build_job_profile',
-    request,
-    '/api/profiles',
-    (r) => `profile ${r.profile_id}, ${r.limits.length} limits`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    },
-  )
-}
-
-export function findWindows(profileId: string) {
-  return call<Windows>(
-    'find_windows',
-    { profile_id: profileId },
-    `/api/profiles/${profileId}/windows`,
-    (r) =>
-      `${r.days.length} days, suggested ${r.suggested_days.join(', ') || 'none'}, data ${r.data.age_hours} h old`,
-  )
-}
-
-export function explainDay(profileId: string, date: string) {
-  return call<DayExplanation>(
-    'explain_day',
-    { profile_id: profileId, date },
-    `/api/profiles/${profileId}/days/${date}`,
-    (r) =>
-      `${r.hours.length} hours, limiting ${r.day.limiting_parameter ?? 'none'}`,
-  )
-}
-
-export function checkTaskFits(profileId: string, start: string, durationMinutes: number) {
-  const params = new URLSearchParams({ start, duration_minutes: String(durationMinutes) })
-  return call<TaskFit>(
-    'check_task_fits',
-    { profile_id: profileId, start, duration_minutes: durationMinutes },
-    `/api/profiles/${profileId}/task-fit?${params}`,
-    (r) => `fits ${r.fits ?? 'unknown'}, latest start ${r.latest_start?.local.slice(11, 16) ?? 'none'}`,
-  )
-}
-
-export function dataStatus(siteId: SiteId) {
-  return call<DataStatus>(
-    'data_status',
-    { site_id: siteId },
-    `/api/data-status?site_id=${siteId}`,
-    (r) => `${r.sources.length} sources, ${r.data.freshness}`,
-  )
+export type AgentMessage = {
+  role: 'user' | 'assistant'
+  content: string
 }

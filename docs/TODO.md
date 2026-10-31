@@ -1,30 +1,32 @@
 # Harbour Pulse: TODO
 
 Compared [PLAN.md](PLAN.md) with the repository at 2026-10-31 (commit `078dc13`).
+The frontend has since pivoted to a technician-only PoC; the older planner/agent checklist below
+is historical. See [the frontend README](../frontend/README.md) for current behavior.
 
 **[M]** / **[S]** / **[C]** priorities are estimates based on the plan (Must / Should / Could); `harbour-pulse-moscow.png` is missing. Revisit priorities when available.
 
 ## Current state
 
-- **Backend:** FastAPI: `GET /health`, `GET /api/forecast?latitude&longitude`. Fetches deterministic 3-day Open-Meteo forecast and marine data: 10 m wind (knots), waves, swell, visibility, precipitation probability. Validates coordinates; handles UTC, `null`, and 502 errors. 2 passing unit tests.
-- **Frontend:** React 19, Vite, Tailwind 4, shadcn/ui, PWA service worker, IndexedDB forecast cache, localStorage stations, online/offline status.
-- **AI:** Qwen 3 0.6B via Transformers.js in a web worker; summarizes values only. No tools or Ollama.
+- **Backend:** FastAPI forecast and planner APIs, including 3-day Open-Meteo weather/marine forecasts and cached planning data.
+- **Frontend:** React 19 technician dashboard, selectable workday, sample task timeline, PWA service worker, IndexedDB 72-hour forecast cache, and online/offline status.
+- **AI:** Browser-local WebLLM chat and daily summaries; first model use requires WebGPU and a model download. No backend agent or tool-call panel is used by the PoC frontend.
 - **Notebook:** Ollama installed (`llama3.2`, `deepseek-r1:1.5b`), 36 GB RAM; `uv` and `pnpm` work.
 
 ## Main gaps vs. plan
 
 | Plan | Current |
 | --- | --- |
-| Ollama agent with tool calling, model up to 10B | Browser Qwen 0.6B, summaries only |
+| Planner chat + tool panel | Technician-only dashboard with local WebLLM chat and summaries |
 | Engine for limits, windows, ensemble probabilities | Raw data only |
 | DMI HARMONIE/WAM, ECMWF waef, Open-Meteo ensemble, lightning | 3-day deterministic Open-Meteo only |
 | 21-day calendar, 3 confidence levels | 3 days, no confidence |
-| Chat + dashboard + tool panel, ECharts | Station form and forecast |
+| Planner chat + dashboard + tool panel, ECharts | Workday selector, seeded task timeline, weather overview, local chat |
 | Offline JSON briefing pack | Browser IndexedDB snapshot |
 | Wind in m/s; turbine wind at 100 m | Knots; 10 m only |
 | Apache-2.0, ATTRIBUTION.md, eval | No license, attribution, or eval |
 
-At H0, decide whether to extend the current app or build a new frontend. Recommendation: extend the backend, rebuild the frontend as chat + dashboard, and reuse the PWA/IndexedDB offline layer.
+The current frontend follows the technician-only PoC direction; the backend planning APIs remain available independently of this UI.
 
 ## H0: Kickoff (all)
 
@@ -72,23 +74,23 @@ At H0, decide whether to extend the current app or build a new frontend. Recomme
 ## C. Agent
 
 - [ ] [M] Evaluate 2–3 offline, quantized Ollama models up to 10B; document name, size, license in README.
-- [ ] [M] Build a custom loop over Ollama chat API with tool calling (no framework).
-- [ ] [M] Expose tools as FastAPI endpoints and agent tools: `list_sites`, `build_job_profile`, `find_windows`, `explain_day`, `check_task_fits`, `get_conditions_now`, `data_status`. *All 7 endpoints done, incl. `get_conditions_now`; see `backend/README.md`. Agent tool wiring to do.*
-- [ ] [M] Chat endpoint returns response text and tool calls (name, input, short output) for the tool panel.
-- [ ] [M] System prompt: numbers only from tools; show data age; never say “safe”/“go”; conversation cannot change limits (“what-if” must be labeled simulation); if offline or data is >12 h old, give no time recommendation; reply in user's language.
-- [ ] [M] Offline agent uses the briefing pack; `get_conditions_now` reports that live lightning is unavailable.
+- [x] [M] Build a custom loop over Ollama chat API with tool calling (no framework).
+- [x] [M] Expose tools as FastAPI endpoints and agent tools: `list_sites`, `build_job_profile`, `find_windows`, `explain_day`, `check_task_fits`, `get_conditions_now`, `data_status`. *Planner endpoints are also callable as model tools.*
+- [x] [M] Chat endpoint returns response text and tool calls (name, input, short output) for the tool panel.
+- [x] [M] System prompt and response guard: numbers from tools; show data age; no operational authorization; stale data cannot produce a time recommendation; reply in the user's language.
+- [x] [M] Offline agent uses the briefing pack; `get_conditions_now` reports that live lightning is unavailable.
 - [ ] [M] Add `eval/prompts.yaml` (15 prompts: 5 planning, 3 explanations, 4 offline, 3 tricky) and `eval/run_eval.py` (tool choice/order, output-matched numbers, data age, no “safe”).
-- [ ] [S] Add code-level guard against “safe” / “go” in responses.
+- [x] [S] Add code-level guard against “safe” / “go” in responses.
 - [ ] [C] Last-resort fallback: profile form; LLM only explains.
 
 ## D. Frontend and demo
 
-- [ ] [M] Planner layout: chat left, dashboard right, tool panel below. *Layout done; a job form stands in for chat until the agent lands.*
+- [x] [M] Planner layout: chat left, dashboard right, tool panel below. *Chat is primary; the job form remains available as a fallback.*
 - [x] [M] 21-day calendar: color by probability, hatching by confidence, days 16–21 as outlook.
 - [x] [M] Day detail (ECharts): hourly timeline, limit bars, window, transit, daylight, limiting parameter, recalculation date.
 - [x] [M] Render dashboard only from API tool results, never LLM JSON.
-- [ ] [M] Show every agent tool call in the tool panel. *Panel logs every UI API call (`frontend/src/lib/tool-log.ts`); agent calls to wire in once the chat endpoint exists.*
-- [ ] [M] Offline technician view: narrow layout, countdown to last return transfer, data age (green <6 h, yellow 6–12 h, >12 h informational only), chat. *Done except chat: last `/task-fit` result is kept in localStorage so the countdown and data age work without a connection; a new task check still needs the local backend.*
+- [x] [M] Show every agent tool call in the tool panel.
+- [x] [M] Offline technician view: dashboard, current forecast, countdown to last return transfer, data age, local chat, and briefing pack cache. *Offline tool calls require the local API and Ollama to remain running.*
 - [ ] [S] Daily brief: window/probability, current values vs. limits, 48/80 km lightning map, data age.
 - [ ] [S] Profile editor with default-value sources.
 - [x] [M] Use Europe/Copenhagen; attribute DMI, ECMWF, Open-Meteo; show “decision support; captain decides”.

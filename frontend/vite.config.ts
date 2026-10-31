@@ -31,6 +31,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,webmanifest}'],
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         // Keep the Google Fonts files so the app looks the same offline.
         runtimeCaching: [
           {

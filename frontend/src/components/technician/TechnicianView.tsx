@@ -1,355 +1,489 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ChatCircleDots, Lightning } from '@phosphor-icons/react'
-import { Button } from '@/components/ui/button'
-import { clock, dateTime, limitNames, percent, TIME_ZONE } from '@/lib/format'
-import { buildJobProfile, checkTaskFits } from '@/lib/planner'
-import type { Freshness, Profile, SiteId, TaskFit, TaskId, VesselId } from '@/lib/planner'
+import { useCallback, useMemo, useState } from 'react'
+import { ArrowLeft, ArrowRight, Check, Clock, Compass, MapPin, Waves, Wind } from '@phosphor-icons/react'
+import { ChatPanel } from '@/components/ChatPanel'
+import { WeatherOverview } from '@/components/WeatherOverview'
 import { cn } from '@/lib/utils'
+import { TIME_ZONE, weekday, dayMonth } from '@/lib/format'
+import type { CachedForecast } from '@/lib/weather'
+import type { SiteId } from '@/lib/planner'
 
-const STORAGE_KEY = 'harbour-pulse:technician'
-const STEP_MINUTES = 15
+const sites = [
+  { id: 'hr1', name: 'Horns Rev 1', short: 'HR1', latitude: 55.483, longitude: 7.833, port: 'Esbjerg' },
+  { id: 'hr2', name: 'Horns Rev 2', short: 'HR2', latitude: 55.6, longitude: 7.583, port: 'Esbjerg' },
+  { id: 'hr3', name: 'Horns Rev 3', short: 'HR3', latitude: 55.703, longitude: 7.689, port: 'Hvide Sande' },
+] as const
 
-// The last answer from the engine is kept on the device, so the countdown and
-// the data age still work when the vessel loses its connection.
-type Saved = { profile: Profile; base: TaskFit; check?: TaskFit }
-
-function readSaved(): Saved | undefined {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as Saved) : undefined
-  } catch {
-    return undefined
-  }
+type SampleTask = {
+  id: string
+  time: string
+  duration: string
+  title: string
+  area: string
+  weatherWatch: string
 }
 
-function writeSaved(saved: Saved) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(saved))
-  } catch {
-    // Storage can be full or blocked; the view still works for this session.
-  }
+const sampleTasks: SampleTask[] = [
+  {
+    id: 'transfer',
+    time: '07:30',
+    duration: '45 min',
+    title: 'Vessel transfer & turbine access',
+    area: 'Access',
+    weatherWatch: 'Wave height, period and vessel motion',
+  },
+  {
+    id: 'walkdown',
+    time: '08:30',
+    duration: '30 min',
+    title: 'Turbine condition walkdown',
+    area: 'Tower',
+    weatherWatch: 'Wind, rain and visibility on exposed areas',
+  },
+  {
+    id: 'drivetrain',
+    time: '09:15',
+    duration: '90 min',
+    title: 'Drivetrain & nacelle inspection',
+    area: 'Nacelle',
+    weatherWatch: 'Wind limits for work at height',
+  },
+  {
+    id: 'hydraulics',
+    time: '11:15',
+    duration: '75 min',
+    title: 'Hydraulic and cooling-system service',
+    area: 'Nacelle',
+    weatherWatch: 'Wind and safe access; follow task-specific procedures',
+  },
+  {
+    id: 'sensors',
+    time: '13:00',
+    duration: '60 min',
+    title: 'Control & condition-monitoring checks',
+    area: 'Nacelle',
+    weatherWatch: 'Stable access; check alarms and work permits',
+  },
+  {
+    id: 'return',
+    time: '15:00',
+    duration: '45 min',
+    title: 'Return transfer & close-out',
+    area: 'Access',
+    weatherWatch: 'Reassess sea state and vessel transfer conditions',
+  },
+]
+
+const TASK_STATE_KEY = 'harbour-pulse:sample-task-state'
+const SITE_KEY = 'harbour-pulse:technician-site'
+const DATE_KEY = 'harbour-pulse:technician-date'
+
+function localDate(timestamp: number) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(new Date(timestamp))
 }
 
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : 'Something went wrong.'
+function shiftDate(date: string, days: number) {
+  const value = new Date(`${date}T12:00:00Z`)
+  value.setUTCDate(value.getUTCDate() + days)
+  return value.toISOString().slice(0, 10)
 }
 
-function useNow(intervalMs: number) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(timer)
-  }, [intervalMs])
-  return now
-}
-
-// Age is recomputed on the device, so it keeps growing while offline.
-function freshness(fetchedAt: string, now: number): { hours: number; level: Freshness } {
-  const hours = (now - new Date(fetchedAt).getTime()) / 3_600_000
-  return { hours, level: hours < 6 ? 'fresh' : hours <= 12 ? 'aging' : 'stale' }
-}
-
-function duration(ms: number) {
-  const minutes = Math.max(0, Math.floor(ms / 60_000))
-  const hours = Math.floor(minutes / 60)
-  return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`
-}
-
-function todayLocal() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: TIME_ZONE }).format(new Date())
-}
-
-function nextQuarterHour() {
+function localMinute(timestamp: number) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
-  }).formatToParts(new Date())
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value)
-  const minute = Number(parts.find((part) => part.type === 'minute')?.value)
-  const total = Math.min(23 * 60 + 45, Math.ceil((hour * 60 + minute) / STEP_MINUTES) * STEP_MINUTES)
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+  }).formatToParts(new Date(timestamp))
+  return Number(parts.find((part) => part.type === 'hour')?.value) * 60
+    + Number(parts.find((part) => part.type === 'minute')?.value)
 }
 
-const control =
-  'h-10 w-full rounded-md border border-input bg-card px-2.5 text-base text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40'
-
-function Setup({ busy, onSubmit }: { busy: boolean; onSubmit: (site: SiteId, vessel: VesselId, task: TaskId) => void }) {
-  const [site, setSite] = useState<SiteId>('hr1')
-  const [vessel, setVessel] = useState<VesselId>('ctv')
-  const [task, setTask] = useState<TaskId>('nacelle')
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    onSubmit(site, vessel, task)
+function readSite(): SiteId {
+  try {
+    const saved = localStorage.getItem(SITE_KEY)
+    const match = sites.find((site) => site.id === saved)
+    if (match) return match.id
+  } catch {
+    // Use the PoC's default site when storage is unavailable.
   }
-
-  return (
-    <form onSubmit={submit} className="grid gap-3">
-      <p className="text-muted-foreground">
-        Pick today's farm, vessel and task. Do this before departure while you still have a
-        connection.
-      </p>
-      <select className={control} value={site} onChange={(event) => setSite(event.target.value as SiteId)} aria-label="Wind farm">
-        <option value="hr1">Horns Rev 1</option>
-        <option value="hr2">Horns Rev 2</option>
-        <option value="hr3">Horns Rev 3</option>
-      </select>
-      <select className={control} value={vessel} onChange={(event) => setVessel(event.target.value as VesselId)} aria-label="Vessel">
-        <option value="ctv">CTV, sails back to port</option>
-        <option value="sov">SOV, stays at the farm</option>
-      </select>
-      <select className={control} value={task} onChange={(event) => setTask(event.target.value as TaskId)} aria-label="Task">
-        <option value="nacelle">Nacelle work</option>
-        <option value="hub_locked_rotor">Hub work, rotor locked</option>
-        <option value="lifting">Lifting and material transport</option>
-      </select>
-      <Button type="submit" size="lg" disabled={busy} className="h-11 text-base">
-        {busy ? 'Downloading…' : 'Download today’s brief'}
-      </Button>
-    </form>
-  )
+  return 'hr1'
 }
 
-function Countdown({ fit, now }: { fit: TaskFit; now: number }) {
-  if (fit.fits === null) {
-    return <p className="font-display text-2xl font-semibold">No timing given</p>
+function readSelectedDate(now: number) {
+  try {
+    const saved = localStorage.getItem(DATE_KEY)
+    const today = localDate(now)
+    if (saved && saved >= today && saved <= shiftDate(today, 2)) return saved
+  } catch {
+    // Start on the current local day when storage is unavailable.
   }
-  if (!fit.last_transfer_back) {
-    return (
-      <>
-        <p className="font-display text-2xl font-semibold">No transfer back found</p>
-        <p className="mt-1 text-sm">{fit.note}</p>
-      </>
+  return localDate(now)
+}
+
+function readTaskState(): Record<string, string[]> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(TASK_STATE_KEY) ?? '{}')
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string[]] =>
+          Array.isArray(entry[1]) &&
+          entry[1].every(
+            (item): item is string =>
+              typeof item === 'string' && sampleTasks.some((task) => task.id === item),
+          ),
+      ),
     )
+  } catch {
+    return {}
   }
-  const left = new Date(fit.last_transfer_back.utc).getTime() - now
-  return (
-    <>
-      <p className="font-display text-6xl leading-none font-bold tabular-nums">{clock(fit.last_transfer_back)}</p>
-      <p className="mt-2 text-lg">
-        {left > 0 ? `Last transfer back in ${duration(left)}` : 'Last transfer back has passed'}
-      </p>
-    </>
-  )
 }
 
-function FitResult({ fit }: { fit: TaskFit }) {
-  if (fit.fits === null) return <p className="text-sm">{fit.note}</p>
-  const blocking = fit.blocking_limits.map((id) => limitNames[id] ?? id).join(', ')
+function forecastContext(
+  siteName: string,
+  date: string,
+  tasks: SampleTask[],
+  completed: string[],
+  entry: CachedForecast | undefined,
+) {
+  const hours = entry?.forecast.hours.filter(
+    (hour) => localDate(new Date(hour.time).getTime()) === date,
+  ) ?? []
+  const weather = hours.map((hour) => ({
+    time: new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: '2-digit' }).format(new Date(hour.time)),
+    wind_10m_kn: hour.wind_speed_kn,
+    gust_10m_kn: hour.wind_gusts_kn,
+    waves_m: hour.wave_height_m,
+    wave_period_s: hour.wave_period_s,
+    visibility_m: hour.visibility_m,
+    rain_probability_pct: hour.precipitation_probability_pct,
+  }))
+  return [
+    `Site: ${siteName}; work date: ${date}.`,
+    `The plan is a PoC sample, not a work order: ${tasks.map((task) => `${task.time} ${task.title} (${task.duration}; watch ${task.weatherWatch})`).join('; ')}.`,
+    `Tasks marked complete: ${completed.join(', ') || 'none'}.`,
+    `Forecast coverage: ${weather.length} hourly points${weather.length < 24 ? ', partial day only' : ', full 24 hours'}.`,
+    `Hourly forecast points: ${JSON.stringify(weather)}.`,
+    'Forecast wind values are at 10 m, not turbine hub height. No lightning forecast is included.',
+    'Explain possible effects on access, work at height, lifts, and schedule only when supported by the forecast. Never invent site limits or declare the work safe.',
+  ].join('\n')
+}
+
+function taskState(task: SampleTask, date: string, today: string, now: number, done: boolean) {
+  if (done) return 'Complete'
+  if (date !== today) return 'Planned'
+  const [hours, minutes] = task.time.split(':').map(Number)
+  const start = hours * 60 + minutes
+  const finish = start + Number.parseInt(task.duration, 10)
+  const current = localMinute(now)
+  if (current >= start && current < finish) return 'In progress'
+  return current >= finish ? 'Next shift' : 'Upcoming'
+}
+
+export function TechnicianView({
+  online,
+  now,
+  wallNow,
+  demoTimeActive,
+}: {
+  online: boolean
+  now: number
+  wallNow: number
+  demoTimeActive: boolean
+}) {
+  const [siteId, setSiteId] = useState<SiteId>(readSite)
+  const [selectedDate, setSelectedDate] = useState(() => readSelectedDate(now))
+  const [completedByDay, setCompletedByDay] = useState(readTaskState)
+  const [forecastEntry, setForecastEntry] = useState<CachedForecast>()
+  const site = sites.find((item) => item.id === siteId) ?? sites[0]
+  const today = localDate(now)
+  const completed = useMemo(
+    () => completedByDay[`${siteId}:${selectedDate}`] ?? [],
+    [completedByDay, selectedDate, siteId],
+  )
+  const hours = useMemo(
+    () => forecastEntry?.forecast.hours.filter((hour) => localDate(new Date(hour.time).getTime()) === selectedDate) ?? [],
+    [forecastEntry, selectedDate],
+  )
+  const tasksComplete = completed.length
+  const handleForecastEntry = useCallback((entry: CachedForecast | undefined) => {
+    setForecastEntry(entry)
+  }, [])
+  const context = useMemo(
+    () => forecastContext(site.name, selectedDate, sampleTasks, completed, forecastEntry),
+    [completed, forecastEntry, selectedDate, site.name],
+  )
+
+  function changeSite(value: SiteId) {
+    setSiteId(value)
+    setForecastEntry(undefined)
+    try {
+      localStorage.setItem(SITE_KEY, value)
+    } catch {
+      // The selected site remains active until reload.
+    }
+  }
+
+  function changeDate(value: string) {
+    if (value < today || value > shiftDate(today, 2)) return
+    setSelectedDate(value)
+    try {
+      localStorage.setItem(DATE_KEY, value)
+    } catch {
+      // The selected work date remains active until reload.
+    }
+  }
+
+  function toggleTask(id: string) {
+    const key = `${siteId}:${selectedDate}`
+    const next = completed.includes(id)
+      ? completed.filter((item) => item !== id)
+      : [...completed, id]
+    const state = { ...completedByDay, [key]: next }
+    setCompletedByDay(state)
+    try {
+      localStorage.setItem(TASK_STATE_KEY, JSON.stringify(state))
+    } catch {
+      // Task checkmarks remain available until reload.
+    }
+  }
+
+  const startDate = today
+  const endDate = shiftDate(today, 2)
+  const dataAgeHours = forecastEntry
+    ? Math.max(0, (wallNow - new Date(forecastEntry.forecast.fetched_at).getTime()) / 3_600_000)
+    : undefined
+  const dataLabel = dataAgeHours === undefined
+    ? 'Forecast not downloaded'
+    : dataAgeHours > 72
+      ? 'Forecast older than 72 h'
+      : `Forecast ${dataAgeHours.toFixed(1)} h old`
+
   return (
-    <div className={cn('rounded-md border-l-4 px-4 py-3', fit.fits ? 'fit-yes' : 'fit-no')}>
-      <p className="font-display text-xl font-semibold">
-        {fit.fits ? 'Fits before the last transfer back' : 'Does not fit from that start'}
-      </p>
-      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">Latest start</dt>
-        <dd className="tabular-nums">{fit.latest_start ? clock(fit.latest_start) : 'None today'}</dd>
-        <dt className="text-muted-foreground">Last transfer back</dt>
-        <dd className="tabular-nums">{clock(fit.last_transfer_back)}</dd>
-        <dt className="text-muted-foreground">Ensemble members agreeing</dt>
-        <dd className="tabular-nums">{percent(fit.ensemble_fraction)}</dd>
-        {blocking && (
-          <>
-            <dt className="text-muted-foreground">Limited by</dt>
-            <dd>{blocking}</dd>
-          </>
-        )}
-      </dl>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Timing from: {fit.reference}. {fit.note}
-      </p>
+    <div className="grid gap-5">
+      <section className="field-hero relative overflow-hidden rounded-xl p-5 text-white sm:p-7">
+        <div className="field-hero-contour" aria-hidden />
+        <div className="relative z-10 flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <p className="text-xs font-semibold tracking-[0.18em] text-cyan-100/75 uppercase">Technician field brief · PoC</p>
+            <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight sm:text-4xl">{site.name}</h2>
+            <p className="mt-2 flex items-center gap-2 text-sm text-white/75">
+              <MapPin className="size-4" aria-hidden />
+              Service base {site.port} · approximate site centre
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="grid gap-1 text-xs text-white/70">
+              Wind farm
+              <select
+                className="h-10 min-w-40 rounded-md border border-white/20 bg-[#14333d] px-3 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+                value={siteId}
+                onChange={(event) => {
+                  const match = sites.find((item) => item.id === event.target.value)
+                  if (match) changeSite(match.id)
+                }}
+              >
+                {sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs text-white/70">
+              Work date
+              <input
+                className="h-10 rounded-md border border-white/20 bg-[#14333d] px-3 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
+                type="date"
+                value={selectedDate}
+                min={startDate}
+                max={endDate}
+                onChange={(event) => changeDate(event.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+        <div className="relative z-10 mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/15 pt-4">
+          <div className="flex items-center gap-2 text-sm">
+            <Compass className="size-4 text-cyan-200" aria-hidden />
+            <span>{weekday(selectedDate)}, {dayMonth(selectedDate)}</span>
+            {demoTimeActive && <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs">Demo time</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => changeDate(shiftDate(selectedDate, -1))}
+              disabled={selectedDate <= startDate}
+              aria-label="Previous workday"
+              className="grid size-9 place-items-center rounded-md border border-white/20 outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-cyan-200 disabled:opacity-30"
+            >
+              <ArrowLeft className="size-4" aria-hidden />
+            </button>
+            <div className="flex gap-1 rounded-md bg-black/15 p-1" role="group" aria-label="Select workday">
+              {[0, 1, 2].map((offset) => {
+                const day = shiftDate(today, offset)
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => changeDate(day)}
+                    aria-pressed={selectedDate === day}
+                    className="rounded px-3 py-1.5 text-xs text-white/75 outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-cyan-200 aria-pressed:bg-white aria-pressed:font-semibold aria-pressed:text-[#12303a]"
+                  >
+                    {offset === 0 ? 'Today' : weekday(day)}
+                  </button>
+                )
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => changeDate(shiftDate(selectedDate, 1))}
+              disabled={selectedDate >= endDate}
+              aria-label="Next workday"
+              className="grid size-9 place-items-center rounded-md border border-white/20 outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-cyan-200 disabled:opacity-30"
+            >
+              <ArrowRight className="size-4" aria-hidden />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+        <div className="grid content-start gap-5">
+          <WeatherOverview
+            key={siteId}
+            site={site}
+            siteId={site.id}
+            online={online}
+            now={now}
+            wallNow={wallNow}
+            selectedDate={selectedDate}
+            demoTimeActive={demoTimeActive}
+            onForecastEntry={handleForecastEntry}
+          />
+
+          <section aria-labelledby="task-plan-title" className="rounded-xl border bg-card p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold tracking-wide text-primary uppercase">Day plan</p>
+                <h3 id="task-plan-title" className="mt-1 font-display text-xl font-semibold">Maintenance task breakdown</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Sample shift · confirm the actual work order, permits and site procedures.</p>
+              </div>
+              <p className="inline-flex items-center gap-2 rounded-full bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground">
+                <Check className="size-3.5" aria-hidden />
+                {tasksComplete}/{sampleTasks.length} complete
+              </p>
+            </div>
+
+            <ol className="mt-4 grid gap-2">
+              {sampleTasks.map((task) => {
+                const done = completed.includes(task.id)
+                const state = taskState(task, selectedDate, today, now, done)
+                const active = state === 'In progress'
+                return (
+                  <li
+                    key={task.id}
+                    className={cn(
+                      'task-row grid gap-3 rounded-lg border p-3 sm:grid-cols-[4.25rem_minmax(0,1fr)_auto] sm:items-center',
+                      active && 'task-row-active',
+                      done && 'task-row-complete',
+                    )}
+                  >
+                    <div className="flex items-center gap-2 font-code text-sm font-semibold tabular-nums text-primary">
+                      <Clock className="size-4" aria-hidden />
+                      {task.time}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className={cn('font-medium', done && 'line-through opacity-60')}>{task.title}</h4>
+                        <span className={cn(
+                          'rounded-full px-2 py-0.5 text-[0.65rem] font-semibold',
+                          active ? 'bg-primary text-primary-foreground' : done ? 'bg-emerald-100 text-emerald-900' : 'bg-muted text-muted-foreground',
+                        )}>
+                          {state}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {task.area} · {task.duration} · Weather watch: {task.weatherWatch}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleTask(task.id)}
+                      aria-pressed={done}
+                      className="min-h-9 rounded-md border px-3 text-xs font-medium outline-none hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/50"
+                    >
+                      {done ? 'Mark pending' : 'Mark complete'}
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+            <p className="mt-3 border-t pt-3 text-xs leading-relaxed text-muted-foreground">
+              Demonstration activities, not a prescribed industry work pack. Safety context:
+              {' '}
+              <a
+                href="https://www.gplusoffshorewind.com/work-programme/workstreams/guidelines"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-primary underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                G+ good-practice guidance
+              </a>
+              {' · '}
+              <a
+                href="https://www.gplusoffshorewind.com/work-programme/workstreams/statistics"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-primary underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                incident data
+              </a>
+              . No universal weather limits are implied.
+            </p>
+          </section>
+        </div>
+
+        <div className="grid content-start gap-5">
+          <ChatPanel
+            key={`${siteId}:${selectedDate}`}
+            siteId={siteId}
+            date={selectedDate}
+            context={context}
+          />
+          <section className="rounded-xl border bg-card p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold tracking-wide text-primary uppercase">Shift snapshot</p>
+                <h3 className="mt-1 font-display text-lg font-semibold">Workday at a glance</h3>
+              </div>
+              <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">{dataLabel}</span>
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-3">
+              <Snapshot label="Planned activities" value={`${sampleTasks.length}`} />
+              <Snapshot label="Forecast hours" value={hours.length ? `${hours.length} hourly points` : 'Not downloaded'} />
+              <Snapshot label="Completed" value={`${tasksComplete} of ${sampleTasks.length}`} />
+              <Snapshot label="Data source" value={forecastEntry?.forecast.source ?? 'Waiting for forecast'} />
+            </dl>
+            <p className="mt-3 flex items-start gap-2 border-t pt-3 text-xs leading-relaxed text-muted-foreground">
+              <Waves className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+              Sea state can change transfer access and vessel motion; wind and gusts may constrain work at height and lifting.
+              Site-approved limits take precedence over this prototype.
+            </p>
+            {!online && (
+              <p className="mt-3 flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                <Wind className="size-4 shrink-0" aria-hidden />
+                Offline mode: use the forecast saved on this device. Live lightning is not included.
+              </p>
+            )}
+          </section>
+        </div>
+      </section>
     </div>
   )
 }
 
-export function TechnicianView({ plannerProfile, online }: { plannerProfile?: Profile; online: boolean }) {
-  const [saved, setSaved] = useState<Saved | undefined>(readSaved)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [start, setStart] = useState(nextQuarterHour)
-  const [minutes, setMinutes] = useState(90)
-  const now = useNow(30_000)
-
-  const download = useCallback(async (profile: Profile) => {
-    setBusy(true)
-    setError('')
-    try {
-      // The engine steps in quarter hours from the start, so align the start to
-      // match the times a technician gets from "Check the task".
-      const step = STEP_MINUTES * 60_000
-      const start = new Date(Math.floor(Date.now() / step) * step).toISOString()
-      const base = await checkTaskFits(profile.profile_id, start, STEP_MINUTES)
-      const next = { profile, base }
-      setSaved(next)
-      writeSaved(next)
-    } catch (failure) {
-      setError(messageFrom(failure))
-    } finally {
-      setBusy(false)
-    }
-  }, [])
-
-  async function setup(site_id: SiteId, vessel: VesselId, task: TaskId) {
-    setBusy(true)
-    setError('')
-    try {
-      const today = todayLocal()
-      const profile = await buildJobProfile({
-        site_id,
-        vessel,
-        task,
-        work_hours_per_day: 1,
-        start_date: today,
-        end_date: today,
-      })
-      await download(profile)
-    } catch (failure) {
-      setError(messageFrom(failure))
-      setBusy(false)
-    }
-  }
-
-  async function check(event: FormEvent) {
-    event.preventDefault()
-    if (!saved) return
-    setBusy(true)
-    setError('')
-    try {
-      // A time without an offset is read by the backend as Copenhagen time.
-      const fit = await checkTaskFits(saved.profile.profile_id, `${todayLocal()}T${start}`, minutes)
-      const next = { ...saved, check: fit }
-      setSaved(next)
-      writeSaved(next)
-    } catch (failure) {
-      setError(
-        online
-          ? messageFrom(failure)
-          : 'No connection to the planner engine. The countdown above is from the last download.',
-      )
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const age = saved && freshness(saved.base.data.fetched_at.utc, now)
-
+function Snapshot({ label, value }: { label: string; value: string }) {
   return (
-    <div className="mx-auto grid w-full max-w-md gap-6 p-4 sm:p-6">
-      {error && (
-        <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      )}
-
-      {!saved ? (
-        <section aria-labelledby="setup-title" className="grid gap-3">
-          <h2 id="setup-title" className="font-display text-2xl font-semibold">
-            Today offshore
-          </h2>
-          {plannerProfile && (
-            <Button variant="outline" size="lg" disabled={busy} onClick={() => download(plannerProfile)} className="h-11">
-              Use the planned job: {plannerProfile.site.name}, {plannerProfile.vessel.toUpperCase()}
-            </Button>
-          )}
-          <Setup busy={busy} onSubmit={setup} />
-        </section>
-      ) : (
-        <>
-          <section aria-labelledby="countdown-title" className="countdown rounded-lg p-5">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 id="countdown-title" className="text-sm">
-                {saved.profile.site.name}, {saved.profile.vessel.toUpperCase()}
-              </h2>
-              {age && (
-                <p className={cn('inline-flex items-center gap-1.5 text-sm', `age-${age.level}`)}>
-                  <span className="age-dot size-2 rounded-full" aria-hidden />
-                  Data {age.hours.toFixed(1)} h old
-                </p>
-              )}
-            </div>
-            <div className="mt-4">
-              {age?.level === 'stale' ? (
-                <>
-                  <p className="font-display text-2xl font-semibold">Data older than 12 hours</p>
-                  <p className="mt-1">No timing is given from old data. Ask the vessel master.</p>
-                </>
-              ) : (
-                <Countdown fit={saved.base} now={now} />
-              )}
-            </div>
-            <p className="mt-4 text-sm opacity-80">
-              Sunset {clock(saved.base.sunset)}. Forecast fetched {dateTime(saved.base.data.fetched_at)}.
-            </p>
-          </section>
-
-          <p className="flex gap-2 text-sm">
-            <Lightning className="mt-0.5 size-4 shrink-0 text-(--signal)" aria-hidden />
-            <span>
-              Live lightning is not in this brief. Follow the vessel's lightning procedure and listen to
-              the radio.
-            </span>
-          </p>
-
-          <section aria-labelledby="fit-title" className="grid gap-3">
-            <h2 id="fit-title" className="font-display text-xl font-semibold">
-              Will a task fit?
-            </h2>
-            <form onSubmit={check} className="grid grid-cols-2 gap-3">
-              <label className="grid gap-1.5 text-sm">
-                <span className="text-muted-foreground">Start</span>
-                <input className={control} type="time" step={STEP_MINUTES * 60} value={start} onChange={(event) => setStart(event.target.value)} />
-              </label>
-              <label className="grid gap-1.5 text-sm">
-                <span className="text-muted-foreground">Duration, minutes</span>
-                <input
-                  className={control}
-                  type="number"
-                  min={15}
-                  max={720}
-                  step={15}
-                  value={minutes}
-                  onChange={(event) => setMinutes(Number(event.target.value))}
-                />
-              </label>
-              <Button type="submit" size="lg" disabled={busy || age?.level === 'stale'} className="col-span-2 h-11 text-base">
-                Check the task
-              </Button>
-            </form>
-            {saved.check && <FitResult fit={saved.check} />}
-          </section>
-
-          <section aria-labelledby="tech-chat-title" className="grid gap-2">
-            <h2 id="tech-chat-title" className="font-display text-xl font-semibold">
-              Ask the agent
-            </h2>
-            <div className="flex gap-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-              <ChatCircleDots className="mt-0.5 size-5 shrink-0" aria-hidden />
-              <p>The offline agent is not connected yet. It will answer from this same brief.</p>
-            </div>
-          </section>
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={busy || !online} onClick={() => download(saved.profile)}>
-              Download again
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setSaved(undefined)
-                try {
-                  localStorage.removeItem(STORAGE_KEY)
-                } catch {
-                  // Nothing to clear when storage is blocked.
-                }
-              }}
-            >
-              Change job
-            </Button>
-          </div>
-        </>
-      )}
+    <div className="rounded-md bg-muted/50 px-3 py-2.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 truncate text-sm font-semibold" title={value}>{value}</dd>
     </div>
   )
 }
