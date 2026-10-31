@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ChatCircleDots, PaperPlaneRight, Sparkle } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
+import { ModelText } from '@/components/ModelText'
 import { generateLocalChatReply } from '@/lib/local-ai'
 import type { AgentMessage } from '@/lib/planner'
 
@@ -140,13 +141,13 @@ export function ChatPanel({
           messages.map((message, index) => (
             <div
               key={`${index}-${message.role}`}
-              className={`max-w-[92%] whitespace-pre-wrap rounded-md px-3 py-2.5 text-sm leading-relaxed ${
+              className={`max-w-[92%] rounded-md px-3 py-2.5 text-sm leading-relaxed ${
                 message.role === 'user'
-                  ? 'ml-auto bg-primary text-primary-foreground'
+                  ? 'ml-auto whitespace-pre-wrap bg-primary text-primary-foreground'
                   : 'mr-auto border bg-card'
               }`}
             >
-              {message.content}
+              {message.role === 'assistant' ? <ModelText text={message.content} /> : message.content}
             </div>
           ))
         )}
