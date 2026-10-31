@@ -30,8 +30,12 @@ procedures.
   tools (sites, profiles, windows, day explanation, task fit, data status).
 - `backend/src/backend/engine/`: profiles and default limits, window search,
   ensemble probability, confidence tiers. Pure functions.
-- `backend/src/backend/ingest/open_meteo.py`: Open-Meteo ensemble wind, ECMWF
-  WAM waves, DMI visibility and HARMONIE fetchers.
+- `backend/src/backend/ingest/`: Open-Meteo ensemble wind, waves, swell, DMI
+  visibility/HARMONIE and EC46 (`open_meteo.py`); ECMWF waef wave ensemble
+  (`ecmwf_waef.py`); DMI lightning (`dmi_lightning.py`).
+- `backend/src/backend/engine/briefing.py`: offline briefing packs (< 1 MB).
+- `backend/src/backend/store.py`: SQLite cache in `data/cache/` (git-ignored).
+- `backend/src/backend/snapshot.py`: writes demo packs to `data/snapshots/`.
 - `backend/tests/`: endpoint, engine, and ingest tests.
 
 ## Data and offline behavior
@@ -45,8 +49,11 @@ procedures.
   stored in localStorage. The service worker precaches the app shell. Browser
   storage may be evicted.
 - Planner endpoints use m/s winds and return times as UTC plus
-  Europe/Copenhagen local time. Wave heights come from one deterministic run,
-  so probabilities reflect wind ensemble spread only; keep that labelled.
+  Europe/Copenhagen local time. Wave heights come from the ECMWF waef
+  ensemble when downloaded, otherwise one deterministic run shared by all
+  members; responses label which applies, and the UI must too.
+- A loaded briefing pack switches its site to offline mode: no live fetches,
+  no live lightning. Keep that state visible.
 - Do not claim offline model inference has been verified unless it has been
   tested on the target device.
 - Configure `VITE_API_URL` in `frontend/.env.local` when the API is not at

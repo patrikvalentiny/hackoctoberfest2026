@@ -9,6 +9,8 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "astral>=3.2",
+    "eccodes>=2.50.0",
+    "eccodeslib>=2.50.0.33 ; sys_platform != 'win32'",
     "fastapi[standard]>=0.162.0",
     "httpx>=0.28.1",
     "tzdata>=2026.6",

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from astral import Observer
 from astral.sun import sunrise, sunset
 
-from backend.engine.forecast import MemberSet, SiteForecast
+from backend.engine.forecast import MemberSet, SiteForecast, WeeklyOutlook
 from backend.engine.profiles import JobProfile, Limit, Site
 
 LOCAL_TZ = ZoneInfo("Europe/Copenhagen")
@@ -50,6 +50,9 @@ class DayResult:
     limit_failures: dict[str, int]
     recompute_at: datetime | None
     note: str | None
+    # Smallest relative distance to a limit in the window, ensemble median.
+    margin: float | None = None
+    weekly_outlook: WeeklyOutlook | None = None
 
 
 @dataclass(frozen=True)
@@ -170,12 +173,22 @@ def evaluate_day(profile: JobProfile, forecast: SiteForecast, day: date) -> DayR
     members = forecast.ensemble.members
 
     if confidence == "outlook":
+        week = next(
+            (w for w in forecast.weekly_outlook if w.week_start <= day < w.week_start + timedelta(days=7)),
+            None,
+        )
         return DayResult(
             date=day, sunrise=rise, sunset=set_, confidence=confidence, members=members,
             members_with_window=None, probability=None, window=None, members_in_window=None,
             deterministic_window=None, deterministic_evaluated=False, limiting_parameter=None,
             limit_failures={}, recompute_at=recompute,
-            note="Beyond the hourly ensemble horizon; only a weekly outlook applies.",
+            note=(
+                "Beyond the hourly ensemble horizon; only a weekly mean-wind signal applies, "
+                "with no work window or probability."
+                if week
+                else "Beyond the hourly ensemble horizon; no outlook data is available."
+            ),
+            weekly_outlook=week,
         )
 
     # Windows start no earlier than the data time, so today's past hours drop out.
@@ -232,7 +245,22 @@ def evaluate_day(profile: JobProfile, forecast: SiteForecast, day: date) -> DayR
         members_in_window=passing[best], deterministic_window=deterministic_window,
         deterministic_evaluated=deterministic_evaluated, limiting_parameter=limiting,
         limit_failures=failures, recompute_at=recompute, note=None,
+        margin=_margin(forecast, profile, window) if window else None,
     )
+
+
+def _margin(forecast: SiteForecast, profile: JobProfile, window: Window) -> float | None:
+    median = _median_set(forecast.ensemble)
+    checker = _Checker(forecast.times, median, profile.limits)
+    indexes = checker.hours(window.start, window.end)
+    margins = []
+    for limit in profile.limits:
+        for i in indexes or []:
+            value = median.variables[limit.variable][0][i]
+            if value is not None:
+                distance = limit.value - value if limit.comparison == "max" else value - limit.value
+                margins.append(distance / limit.value)
+    return round(min(margins), 3) if margins else None
 
 
 def find_windows(profile: JobProfile, forecast: SiteForecast) -> tuple[list[DayResult], list[date]]:
@@ -261,7 +289,12 @@ def suggest_days(profile: JobProfile, days: list[DayResult]) -> list[date]:
         return [day.date for day in best[3] if day]
     ranked = sorted(
         candidates,
-        key=lambda day: (-(day.probability or 0.0), CONFIDENCE_RANK[day.confidence], day.date),
+        key=lambda day: (
+            -(day.probability or 0.0),
+            -(day.margin if day.margin is not None else -1.0),
+            CONFIDENCE_RANK[day.confidence],
+            day.date,
+        ),
     )
     return sorted(day.date for day in ranked[: profile.days_needed])
 
@@ -407,3 +440,39 @@ def check_task_fits(
         latest_start=latest_start, ensemble_fraction=ensemble_fraction,
         blocking_limits=tuple(sorted(blocking_limits)), note=None,
     )
+
+
+def current_hour(profile_limits: tuple[Limit, ...], forecast: SiteForecast, now: datetime) -> dict | None:
+    """Forecast values for the hour containing `now`; not an observation.
+
+    Uses DMI HARMONIE when it has every value, otherwise the ensemble median.
+    """
+    hour = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    index = {time: i for i, time in enumerate(forecast.times)}.get(hour)
+    if index is None:
+        return None
+    reference_name, reference = "ensemble median", _median_set(forecast.ensemble)
+    if forecast.deterministic is not None and all(
+        forecast.deterministic.variables[limit.variable][0][index] is not None for limit in profile_limits
+    ):
+        reference_name, reference = "DMI HARMONIE deterministic", forecast.deterministic
+    values = {name: series[0][index] for name, series in reference.variables.items()}
+    return {
+        "time": hour,
+        "reference": reference_name,
+        "values": values,
+        "limits": [
+            {
+                "id": limit.id,
+                "label": limit.label,
+                "value": values.get(limit.variable),
+                "limit": limit.value,
+                "unit": limit.unit,
+                "comparison": limit.comparison,
+                "within_limit": None
+                if values.get(limit.variable) is None
+                else _passes(values.get(limit.variable), limit),
+            }
+            for limit in profile_limits
+        ],
+    }

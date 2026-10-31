@@ -10,7 +10,7 @@ wind technicians (see [docs/PLAN.md](docs/PLAN.md) and
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, shadcn/ui
 - **PWA and offline storage:** vite-plugin-pwa service worker, IndexedDB forecast snapshots
 - **Backend:** FastAPI and HTTPX, combining Open-Meteo weather and marine forecast data
-- **Planner engine:** deterministic work-window and ensemble-probability calculations for Horns Rev 1–3 (see [backend/README.md](backend/README.md))
+- **Planner engine:** deterministic work-window and ensemble-probability calculations for Horns Rev 1–3, an ECMWF wave ensemble, DMI lightning, a SQLite cache and offline briefing packs (see [backend/README.md](backend/README.md))
 
 The planner computes work windows against default public limits. It supports
 planning only and never decides whether an operation is safe. Forecasts can be
@@ -39,6 +39,18 @@ offline access.
 
 Set `VITE_API_URL` in `frontend/.env.local` when the API is not at
 `http://localhost:8000`.
+
+The backend downloads the ECMWF wave ensemble (about 1.2 GB per run) in the
+background. Prefetch it before an event with
+`uv run --directory backend python -m backend.ingest.ecmwf_waef`, or set
+`HARBOUR_PULSE_WAEF=0` on slow networks. Offline mode and briefing packs are
+described in [backend/README.md](backend/README.md#offline-mode).
+
+## Licence and data
+
+Code is under the [Apache License 2.0](LICENSE). Forecast and lightning data
+come from Open-Meteo, ECMWF and DMI under CC BY 4.0; see
+[ATTRIBUTION.md](ATTRIBUTION.md).
 
 ## Verify
 

@@ -23,8 +23,10 @@ limits, and procedures.
   tools; documented in `backend/README.md`.
 - `backend/src/backend/engine/` — profiles, default limits, windows,
   probability and confidence (pure functions).
-- `backend/src/backend/ingest/open_meteo.py` — ensemble, marine and DMI
+- `backend/src/backend/ingest/` — Open-Meteo, ECMWF waef and DMI lightning
   fetchers normalized into `SiteForecast`.
+- `backend/src/backend/engine/briefing.py`, `backend/src/backend/store.py` —
+  offline briefing packs and the SQLite cache.
 - `backend/tests/` — mocked provider, engine and input-validation tests.
 - `backend/pyproject.toml` and `backend/uv.lock` — backend dependencies and
   Python requirement (`>=3.14`).
@@ -53,8 +55,11 @@ limits, and procedures.
   persist.
 - Planner endpoints: `GET /api/sites`, `POST /api/profiles`,
   `GET /api/profiles/{id}/windows`, `GET /api/profiles/{id}/days/{date}`,
-  `GET /api/profiles/{id}/task-fit`, `GET /api/data-status`. Missing values
-  count as limit failures; task-fit withholds timing for data over 12 h old.
+  `GET /api/profiles/{id}/task-fit`, `GET /api/conditions-now`,
+  `GET /api/data-status`, and briefing packs at
+  `GET /api/profiles/{id}/briefing-pack`, `POST /api/briefing-pack`. Missing
+  values count as limit failures; task-fit withholds timing for data over 12 h
+  old; offline sites never fetch live data or lightning.
 - `VITE_API_URL` overrides the frontend's default API base URL
   (`http://localhost:8000`). Backend CORS currently allows local Vite origins
   `localhost:5173` and `127.0.0.1:5173`.

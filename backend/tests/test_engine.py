@@ -9,6 +9,7 @@ from backend.engine.profiles import SITES, JobProfile, build_limits
 from backend.engine.windows import LOCAL_TZ, check_task_fits, daylight, evaluate_day, find_windows
 from backend.ingest.open_meteo import build_site_forecast
 from backend.main import app
+from backend.store import Store
 
 DAY = date(2026, 11, 16)
 FETCHED = datetime(2026, 11, 10, 0, tzinfo=UTC)
@@ -249,7 +250,11 @@ class IngestTests(unittest.TestCase):
             }
         }
 
-        forecast = build_site_forecast(SITES["hr1"], ensemble, marine, visibility, dmi, FETCHED)
+        forecast = build_site_forecast(
+            SITES["hr1"],
+            {"ensemble": ensemble, "marine": marine, "visibility": visibility, "dmi": dmi},
+            FETCHED,
+        )
 
         self.assertEqual(forecast.ensemble.members, 2)
         self.assertEqual(forecast.ensemble.variables["wind_speed_10m_ms"][1], [5.5, None])
@@ -261,6 +266,8 @@ class IngestTests(unittest.TestCase):
 class PlannerApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        planner._store = Store(":memory:")
+        self.addCleanup(planner._store.close)
         planner._forecasts["hr1"] = make_forecast(fetched_at=datetime.now(UTC))
 
     def tearDown(self) -> None:

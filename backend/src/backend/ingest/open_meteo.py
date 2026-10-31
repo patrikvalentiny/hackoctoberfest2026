@@ -1,30 +1,39 @@
 """Open-Meteo fetchers normalized into a SiteForecast.
 
 - Wind: ECMWF IFS 0.25 degree ensemble (control + 50 members), 15 days.
-- Waves: ECMWF WAM deterministic. Open-Meteo's wave ensembles return no values
-  for the Horns Rev area, so every wind member shares one wave run.
+- Waves: the ECMWF waef ensemble (see ecmwf_waef) when downloaded, paired
+  with wind members by number. Otherwise ECMWF WAM deterministic, shared by
+  every member, because Open-Meteo's wave ensembles return no values here.
+- Swell: Open-Meteo default marine model, for display only.
 - Visibility: DMI seamless deterministic (HARMONIE, then ECMWF).
 - 0-60 h deterministic: DMI HARMONIE AROME Europe.
+- Days 16+: ECMWF EC46 weekly mean wind via the Seasonal API.
 """
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
 
-from backend.engine.forecast import MemberSet, Series, SiteForecast, SourceInfo
+from backend.engine.forecast import MemberSet, Series, SiteForecast, SourceInfo, WeeklyOutlook
 from backend.engine.profiles import Site
+from backend.ingest.ecmwf_waef import WaveEnsemble, hourly
 
 ENSEMBLE_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
 MARINE_URL = "https://marine-api.open-meteo.com/v1/marine"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+SEASONAL_URL = "https://seasonal-api.open-meteo.com/v1/seasonal"
 ATTRIBUTION = "Weather data by Open-Meteo.com (CC BY 4.0)"
 
 ENSEMBLE_MODEL = "ecmwf_ifs025"
 WAVE_MODEL = "ecmwf_wam"
 VISIBILITY_MODEL = "dmi_seamless"
 DMI_MODEL = "dmi_harmonie_arome_europe"
+OUTLOOK_MODEL = "ecmwf_ec46"
+
+# Payloads the forecast cannot be built without; the rest are optional.
+REQUIRED = ("ensemble", "marine", "visibility", "dmi")
 
 
 class ProviderError(Exception):
@@ -70,15 +79,27 @@ def _horizon_end(times: list[datetime], *series: Series) -> datetime | None:
     return present[-1] if present else None
 
 
+def _weekly_outlook(payload: Any) -> tuple[WeeklyOutlook, ...]:
+    weekly = payload.get("weekly") if isinstance(payload, dict) else None
+    if not isinstance(weekly, dict) or not isinstance(weekly.get("time"), list):
+        raise ProviderError("Open-Meteo seasonal returned an invalid outlook.")
+    count = len(weekly["time"])
+    means = _values(weekly, "wind_speed_10m_mean", count, "Open-Meteo seasonal")
+    anomalies = _values(weekly, "wind_speed_10m_anomaly", count, "Open-Meteo seasonal")
+    return tuple(
+        WeeklyOutlook(week_start=date.fromisoformat(start), wind_speed_10m_mean_ms=mean, wind_speed_10m_anomaly_ms=anomaly)
+        for start, mean, anomaly in zip(weekly["time"], means, anomalies, strict=True)
+        if mean is not None
+    )
+
+
 def build_site_forecast(
     site: Site,
-    ensemble: Any,
-    marine: Any,
-    visibility: Any,
-    dmi: Any,
+    payloads: dict[str, Any],
     fetched_at: datetime,
+    waves: WaveEnsemble | None = None,
 ) -> SiteForecast:
-    ensemble_hourly = _hourly(ensemble, "Open-Meteo ensemble")
+    ensemble_hourly = _hourly(payloads["ensemble"], "Open-Meteo ensemble")
     times = _times(ensemble_hourly, "Open-Meteo ensemble")
     count = len(times)
     wind_10m = ensemble_members(ensemble_hourly, "wind_speed_10m", count, "Open-Meteo ensemble")
@@ -86,35 +107,77 @@ def build_site_forecast(
     if len(wind_10m) != len(wind_100m) or len(wind_10m) < 2:
         raise ProviderError("Open-Meteo ensemble returned mismatched members.")
 
-    def deterministic(payload: Any, source: str, names: list[str]) -> tuple[list[datetime], dict[str, Series]]:
+    def deterministic(payload: Any, source: str, names: list[str]) -> dict[str, Series]:
         hourly = _hourly(payload, source)
         own_times = _times(hourly, source)
-        return own_times, {
+        return {
             name: _aligned(times, own_times, _values(hourly, name, len(own_times), source))
             for name in names
         }
 
-    _, waves = deterministic(marine, "Open-Meteo marine", ["wave_height", "wave_period", "wave_direction"])
-    _, vis = deterministic(visibility, "Open-Meteo DMI seamless", ["visibility"])
-    _, harmonie = deterministic(
-        dmi, "Open-Meteo DMI HARMONIE", ["wind_speed_10m", "wind_speed_100m", "visibility"]
+    wam = deterministic(payloads["marine"], "Open-Meteo marine", ["wave_height", "wave_period", "wave_direction"])
+    vis = deterministic(payloads["visibility"], "Open-Meteo DMI seamless", ["visibility"])
+    harmonie = deterministic(
+        payloads["dmi"], "Open-Meteo DMI HARMONIE", ["wind_speed_10m", "wind_speed_100m", "visibility"]
     )
-    if all(value is None for value in waves["wave_height"]):
+    if all(value is None for value in wam["wave_height"]):
         raise ProviderError("Open-Meteo marine returned no wave heights for this site.")
+    notes: list[str] = []
+    swell = {"swell_wave_height": [None] * count, "swell_wave_period": [None] * count}
+    if payloads.get("swell") is not None:
+        swell = deterministic(payloads["swell"], "Open-Meteo marine swell", list(swell))
+    else:
+        notes.append("Swell data was unavailable for this fetch.")
+    outlook: tuple[WeeklyOutlook, ...] = ()
+    if payloads.get("seasonal") is not None:
+        outlook = _weekly_outlook(payloads["seasonal"])
+    else:
+        notes.append("The EC46 weekly outlook was unavailable for this fetch.")
 
-    members = len(wind_10m)
     shared = {
-        "wave_height_m": waves["wave_height"],
-        "wave_period_s": waves["wave_period"],
-        "wave_direction_deg": waves["wave_direction"],
+        "wave_period_s": wam["wave_period"],
+        "wave_direction_deg": wam["wave_direction"],
+        "swell_wave_height_m": swell["swell_wave_height"],
+        "swell_wave_period_s": swell["swell_wave_period"],
         "visibility_m": vis["visibility"],
     }
+    if waves is not None:
+        # Wind member n (Open-Meteo memberNN) is paired with waef member n.
+        # The control wind run has no waef counterpart and is left out.
+        numbers = [n for n in range(1, len(wind_10m)) if n in waves.members]
+        wave_members = []
+        for number in numbers:
+            interpolated = hourly(waves, number, times)
+            wave_members.append(
+                [value if value is not None else wam["wave_height"][i] for i, value in enumerate(interpolated)]
+            )
+        wind_10m = [wind_10m[n] for n in numbers]
+        wind_100m = [wind_100m[n] for n in numbers]
+        wave_end = waves.times[-1]
+        notes.append(
+            f"Wave heights: ECMWF waef run {waves.run:%Y-%m-%d %H} UTC, {len(numbers)} members "
+            "paired with wind members by number; six-hourly values interpolated to hourly. "
+            "The wind and wave runs can differ by up to 12 h, so pairing is approximate."
+        )
+        if wave_end < times[-1]:
+            notes.append(f"After {wave_end:%Y-%m-%d %H} UTC wave heights fall back to deterministic WAM.")
+    else:
+        wave_members = [wam["wave_height"]] * len(wind_10m)
+        shared["wave_height_m"] = wam["wave_height"]
+        notes.append(
+            "Wave heights are deterministic (ECMWF WAM); probabilities reflect wind "
+            "ensemble spread only. The ECMWF wave ensemble has not been downloaded yet."
+        )
+    notes.append("Open-Meteo does not report model run times; their data age is measured from fetch time.")
+
+    members = len(wind_10m)
     ensemble_set = MemberSet(
         name="ECMWF IFS ensemble",
         variables={
             "wind_speed_10m_ms": wind_10m,
             "wind_speed_100m_ms": wind_100m,
-            **{name: [series] * members for name, series in shared.items()},
+            "wave_height_m": wave_members,
+            **{name: [series] * members for name, series in shared.items() if name != "wave_height_m"},
         },
         deterministic_variables=frozenset(shared),
     )
@@ -124,15 +187,19 @@ def build_site_forecast(
             "wind_speed_10m_ms": [harmonie["wind_speed_10m"]],
             "wind_speed_100m_ms": [harmonie["wind_speed_100m"]],
             "visibility_m": [harmonie["visibility"]],
-            # HARMONIE has no waves; the same WAM run is used.
-            "wave_height_m": [waves["wave_height"]],
-            "wave_period_s": [waves["wave_period"]],
-            "wave_direction_deg": [waves["wave_direction"]],
+            # HARMONIE has no waves; the deterministic WAM run is used.
+            "wave_height_m": [wam["wave_height"]],
+            "wave_period_s": [wam["wave_period"]],
+            "wave_direction_deg": [wam["wave_direction"]],
+            "swell_wave_height_m": [swell["swell_wave_height"]],
+            "swell_wave_period_s": [swell["swell_wave_period"]],
         },
-        deterministic_variables=frozenset({"wind_speed_10m_ms", "wind_speed_100m_ms", "visibility_m", *shared}),
+        deterministic_variables=frozenset(
+            {"wind_speed_10m_ms", "wind_speed_100m_ms", "visibility_m", "wave_height_m", *shared}
+        ),
     )
 
-    sources = (
+    sources = [
         SourceInfo(
             id="ensemble_wind",
             name="ECMWF IFS 0.25° ensemble via Open-Meteo",
@@ -149,8 +216,18 @@ def build_site_forecast(
             model=WAVE_MODEL,
             variables=("wave_height", "wave_period", "wave_direction"),
             ensemble_members=1,
-            horizon_end=_horizon_end(times, waves["wave_height"]),
+            horizon_end=_horizon_end(times, wam["wave_height"]),
             attribution=f"{ATTRIBUTION}; ECMWF (CC BY 4.0)",
+            url="https://open-meteo.com/en/docs/marine-weather-api",
+        ),
+        SourceInfo(
+            id="swell",
+            name="Open-Meteo Marine default model",
+            model="best_match",
+            variables=("swell_wave_height", "swell_wave_period"),
+            ensemble_members=1,
+            horizon_end=_horizon_end(times, swell["swell_wave_height"]),
+            attribution=ATTRIBUTION,
             url="https://open-meteo.com/en/docs/marine-weather-api",
         ),
         SourceInfo(
@@ -173,26 +250,48 @@ def build_site_forecast(
             attribution=f"{ATTRIBUTION}; DMI (CC BY 4.0)",
             url="https://open-meteo.com/en/docs/dmi-api",
         ),
-    )
+        SourceInfo(
+            id="outlook",
+            name="ECMWF EC46 weekly outlook via Open-Meteo Seasonal",
+            model=OUTLOOK_MODEL,
+            variables=("wind_speed_10m_mean", "wind_speed_10m_anomaly"),
+            ensemble_members=0,
+            horizon_end=None,
+            attribution=f"{ATTRIBUTION}; ECMWF (CC BY 4.0)",
+            url="https://open-meteo.com/en/docs/seasonal-forecast-api",
+        ),
+    ]
+    if waves is not None:
+        sources.insert(
+            1,
+            SourceInfo(
+                id="wave_ensemble",
+                name="ECMWF waef wave ensemble (open data)",
+                model="waef swh",
+                variables=("swh",),
+                ensemble_members=len(waves.members),
+                horizon_end=waves.times[-1],
+                attribution="ECMWF open data (CC BY 4.0)",
+                url="https://www.ecmwf.int/en/forecasts/datasets/open-data",
+                run=waves.run,
+            ),
+        )
     return SiteForecast(
         site_id=site.id,
         fetched_at=fetched_at,
         times=times,
         ensemble=ensemble_set,
         deterministic=deterministic_set,
-        sources=sources,
-        notes=(
-            "Wave heights are deterministic (ECMWF WAM); probabilities reflect "
-            "wind ensemble spread only.",
-            "Open-Meteo does not report model run times; data age is measured from fetch time.",
-        ),
+        sources=tuple(sources),
+        notes=tuple(notes),
+        weekly_outlook=outlook,
     )
 
 
-async def fetch_site_forecast(site: Site, client: httpx.AsyncClient | None = None) -> SiteForecast:
+def _requests(site: Site) -> dict[str, tuple[str, dict[str, Any]]]:
     location = {"latitude": site.latitude, "longitude": site.longitude, "timezone": "GMT"}
-    requests = [
-        (
+    return {
+        "ensemble": (
             ENSEMBLE_URL,
             {
                 **location,
@@ -202,20 +301,19 @@ async def fetch_site_forecast(site: Site, client: httpx.AsyncClient | None = Non
                 "forecast_days": 15,
             },
         ),
-        (
+        "marine": (
             MARINE_URL,
-            {
-                **location,
-                "models": WAVE_MODEL,
-                "hourly": "wave_height,wave_period,wave_direction",
-                "forecast_days": 16,
-            },
+            {**location, "models": WAVE_MODEL, "hourly": "wave_height,wave_period,wave_direction", "forecast_days": 16},
         ),
-        (
+        "swell": (
+            MARINE_URL,
+            {**location, "hourly": "swell_wave_height,swell_wave_period", "forecast_days": 16},
+        ),
+        "visibility": (
             FORECAST_URL,
             {**location, "models": VISIBILITY_MODEL, "hourly": "visibility", "forecast_days": 16},
         ),
-        (
+        "dmi": (
             FORECAST_URL,
             {
                 **location,
@@ -225,19 +323,52 @@ async def fetch_site_forecast(site: Site, client: httpx.AsyncClient | None = Non
                 "forecast_days": 4,
             },
         ),
-    ]
+        "seasonal": (
+            SEASONAL_URL,
+            {
+                **location,
+                "models": OUTLOOK_MODEL,
+                "weekly": "wind_speed_10m_mean,wind_speed_10m_anomaly",
+                "wind_speed_unit": "ms",
+                "forecast_days": 45,
+            },
+        ),
+    }
+
+
+async def fetch_payloads(site: Site, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    """Raw provider responses; optional sources are None when they fail."""
+    requests = _requests(site)
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=30)
+
+    async def get(url: str, params: dict[str, Any]) -> Any:
+        response = await http.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+
     try:
-        responses = await asyncio.gather(*(http.get(url, params=params) for url, params in requests))
-        for response in responses:
-            response.raise_for_status()
-        payloads = [response.json() for response in responses]
-    except httpx.HTTPError as error:
-        raise ProviderError("Open-Meteo is unavailable. Try again when online.") from error
-    except ValueError as error:
-        raise ProviderError("Open-Meteo returned unreadable forecast data.") from error
+        results = await asyncio.gather(
+            *(get(url, params) for url, params in requests.values()), return_exceptions=True
+        )
     finally:
         if owns_client:
             await http.aclose()
-    return build_site_forecast(site, *payloads, fetched_at=datetime.now(UTC))
+    payloads: dict[str, Any] = {}
+    for name, result in zip(requests, results, strict=True):
+        if isinstance(result, BaseException):
+            if name in REQUIRED:
+                if isinstance(result, ValueError):
+                    raise ProviderError("Open-Meteo returned unreadable forecast data.") from result
+                raise ProviderError("Open-Meteo is unavailable. Try again when online.") from result
+            payloads[name] = None
+        else:
+            payloads[name] = result
+    return payloads
+
+
+async def fetch_site_forecast(
+    site: Site, client: httpx.AsyncClient | None = None, waves: WaveEnsemble | None = None
+) -> SiteForecast:
+    payloads = await fetch_payloads(site, client)
+    return build_site_forecast(site, payloads, datetime.now(UTC), waves)
