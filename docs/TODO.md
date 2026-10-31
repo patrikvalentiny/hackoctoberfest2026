@@ -1,114 +1,114 @@
 # Harbour Pulse: TODO
 
-Porovnání [PLAN.md](PLAN.md) se stavem repa k 31. 10. 2026 (commit `078dc13`).
+Compared [PLAN.md](PLAN.md) with the repository at 2026-10-31 (commit `078dc13`).
 
-Priorita **[M]** / **[S]** / **[C]** je odhad podle plánu (Must / Should / Could), protože obrázek `harbour-pulse-moscow.png` v repu není. Po doplnění obrázku priority srovnat.
+**[M]** / **[S]** / **[C]** priorities are estimates based on the plan (Must / Should / Could); `harbour-pulse-moscow.png` is missing. Revisit priorities when available.
 
-## Co v repu už je
+## Current state
 
-- **Backend:** FastAPI, `GET /health` a `GET /api/forecast?latitude&longitude`. Volá deterministické Open-Meteo forecast + marine na 3 dny, vítr v 10 m v uzlech, vlny, swell, viditelnost, pravděpodobnost srážek. Validace souřadnic, UTC, `null` hodnoty, chyby 502. 2 unit testy (procházejí).
-- **Frontend:** React 19 + Vite + Tailwind 4 + shadcn/ui, PWA (service worker), IndexedDB cache předpovědi, stanice v localStorage, online/offline stav.
-- **AI:** Qwen 3 0.6B přes Transformers.js ve web workeru, jen shrnutí hodnot. Bez nástrojů, bez Ollamy.
-- **Prostředí na tomto notebooku:** Ollama je nainstalovaná (`llama3.2`, `deepseek-r1:1.5b`), 36 GB RAM, `uv` a `pnpm` fungují.
+- **Backend:** FastAPI: `GET /health`, `GET /api/forecast?latitude&longitude`. Fetches deterministic 3-day Open-Meteo forecast and marine data: 10 m wind (knots), waves, swell, visibility, precipitation probability. Validates coordinates; handles UTC, `null`, and 502 errors. 2 passing unit tests.
+- **Frontend:** React 19, Vite, Tailwind 4, shadcn/ui, PWA service worker, IndexedDB forecast cache, localStorage stations, online/offline status.
+- **AI:** Qwen 3 0.6B via Transformers.js in a web worker; summarizes values only. No tools or Ollama.
+- **Notebook:** Ollama installed (`llama3.2`, `deepseek-r1:1.5b`), 36 GB RAM; `uv` and `pnpm` work.
 
-## Hlavní rozdíly proti plánu
+## Main gaps vs. plan
 
-| Plán | Teď |
+| Plan | Current |
 | --- | --- |
-| Agent nad Ollamou s tool callingem, model do 10B | Qwen 0.6B v prohlížeči, jen shrnutí |
-| Engine: limity, okna, ensemble pravděpodobnost | nic, jen surová data |
-| DMI HARMONIE/WAM, ECMWF waef, Open-Meteo ensemble, blesky | jen Open-Meteo deterministicky, 3 dny |
-| 21denní kalendář, 3 úrovně jistoty | 3 dny bez jistoty |
-| Chat + dashboard + panel nástrojů, ECharts | formulář se stanicí a výpis předpovědi |
-| Briefing pack JSON pro offline | IndexedDB snapshot v prohlížeči |
-| Vítr v m/s, pro turbínu ve 100 m | uzly, jen 10 m |
-| Apache-2.0, ATTRIBUTION.md, eval | chybí licence, atribuce i eval |
+| Ollama agent with tool calling, model up to 10B | Browser Qwen 0.6B, summaries only |
+| Engine for limits, windows, ensemble probabilities | Raw data only |
+| DMI HARMONIE/WAM, ECMWF waef, Open-Meteo ensemble, lightning | 3-day deterministic Open-Meteo only |
+| 21-day calendar, 3 confidence levels | 3 days, no confidence |
+| Chat + dashboard + tool panel, ECharts | Station form and forecast |
+| Offline JSON briefing pack | Browser IndexedDB snapshot |
+| Wind in m/s; turbine wind at 100 m | Knots; 10 m only |
+| Apache-2.0, ATTRIBUTION.md, eval | No license, attribution, or eval |
 
-Rozhodnout v H0: **stavět nad stávající appkou** (rozšířit backend, PWA použít jako UI), nebo začít nový frontend podle plánu. Doporučení: backend rozšířit, frontend přestavět na chat + dashboard a stávající PWA/IndexedDB vrstvu znovu použít pro offline.
+At H0, decide whether to extend the current app or build a new frontend. Recommendation: extend the backend, rebuild the frontend as chat + dashboard, and reuse the PWA/IndexedDB offline layer.
 
-## H0: kickoff (celý tým)
+## H0: Kickoff (all)
 
-- [ ] [M] Rozhodnout výše uvedenou otázku (rozšířit vs. nový frontend) a osud browserového Qwen workeru.
-- [ ] [M] Domluvit JSON schéma odpovědí všech 7 nástrojů a briefing packu; uložit do `docs/schema/` + mocky.
-- [ ] [M] Jednotné hodinové schéma ingestu (site, čas UTC, proměnná, člen ensemble, hodnota, zdroj, čas vydání).
-- [ ] [M] Smoke test API: DMI EDR (`harmonie_dini_sf`, `wam_nsb`), DMI blesky, Open-Meteo ensemble + marine + seasonal, ECMWF `waef`.
-- [ ] [M] Ověřit souřadnice HR1 a HR2 (EMODnet / Wikipedia), 2–3 body na farmu.
-- [ ] [M] Přidat `LICENSE` (Apache-2.0).
-- [ ] [M] Stáhnout kandidátní modely do Ollamy (nemít je až na akci): např. Qwen 3 4B/8B, Gemma, Llama 3.x 8B, Mistral 7B. Ověřit tool calling a licenci v model card.
-- [ ] [M] Zjistit u pořadatele, co smí být připraveno předem.
+- [ ] [M] Decide app approach and whether to keep the browser Qwen worker.
+- [ ] [M] Define JSON schemas and mocks for all 7 tools and the briefing pack in `docs/schema/`.
+- [ ] [M] Agree on hourly ingest schema: site, UTC time, variable, ensemble member, value, source, issue time.
+- [ ] [M] Smoke-test DMI EDR (`harmonie_dini_sf`, `wam_nsb`), DMI lightning, Open-Meteo ensemble/marine/seasonal, and ECMWF `waef`.
+- [ ] [M] Verify HR1/HR2 coordinates (EMODnet/Wikipedia); choose 2–3 points per farm.
+- [ ] [M] Add Apache-2.0 `LICENSE`.
+- [ ] [M] Pre-pull candidate Ollama models (e.g. Qwen 3 4B/8B, Gemma, Llama 3.x 8B, Mistral 7B); verify tool calling and model-card license.
+- [ ] [M] Ask organizers what may be prepared in advance.
 
-## A, Data (ingest, cache)
+## A. Data (ingest, cache)
 
-- [ ] [M] Struktura `backend/src/backend/{ingest,engine,agent,api}`; přesunout stávající `main.py` do `api/`.
-- [ ] [M] Fetcher Open-Meteo Ensemble (ECMWF IFS 0,25°, 51 členů, 15 dní): vítr 10 m a 100 m, m/s.
-- [ ] [M] Fetcher Open-Meteo Marine na 16 dní (rozšířit stávající ze 3 dní): Hs, perioda, směr, swell.
-- [ ] [M] Fetcher DMI HARMONIE DINI (EDR, `position`, CoverageJSON) na 0–60 h: vítr, nárazy, viditelnost, srážky. Záloha: HARMONIE přes Open-Meteo.
-- [ ] [S] Fetcher DMI WAM (`wam_nsb` / `wam_dw`); poznamenat omezení na mělčině Horns Rev.
-- [ ] [S] Fetcher ECMWF `waef` / `swh` (ecmwf-opendata + xarray + cfgrib), jen body farem, běh 00/12 UTC. **Brána v H3.**
-- [ ] [M] Fetcher DMI blesků (bbox + datetime), okruhy 48 a 80 km.
-- [ ] [S] Open-Meteo Seasonal (EC46), týdenní signál pro dny 16–21.
-- [ ] [M] Cache (SQLite nebo Parquet), obnova DMI po 3 h, ensemble po 12 h; čas vydání u každého zdroje.
-- [ ] [M] Snapshot pro HR1 do `data/snapshots/` (CSV + JSON) jako záloha dema.
-- [ ] [M] Ověřit párování členů ensemble Open-Meteo vítr × ECMWF vlny.
-- [ ] [C] ECMWF hustota blesků (`litota1/3/6`).
-- [ ] [C] Deploy (DigitalOcean kredit vyprší po 31. 10. 2026; demo může běžet lokálně).
+- [ ] [M] Create `backend/src/backend/{ingest,engine,agent,api}`; move `main.py` to `api/`.
+- [ ] [M] Fetch Open-Meteo Ensemble (ECMWF IFS 0.25°, 51 members, 15 days): 10 m/100 m wind in m/s.
+- [ ] [M] Extend Open-Meteo Marine to 16 days: Hs, period, direction, swell.
+- [ ] [M] Fetch DMI HARMONIE DINI (EDR `position`, CoverageJSON), 0–60 h: wind, gusts, visibility, precipitation. Fallback: HARMONIE via Open-Meteo.
+- [ ] [S] Fetch DMI WAM (`wam_nsb` / `wam_dw`); note Horns Rev shallow-water limits.
+- [ ] [S] Fetch ECMWF `waef` / `swh` (ecmwf-opendata, xarray, cfgrib) at farm points; 00/12 UTC runs. **H3 gate.**
+- [ ] [M] Fetch DMI lightning by bbox/time; 48 and 80 km radii.
+- [ ] [S] Fetch Open-Meteo Seasonal (EC46); weekly signal for days 16–21.
+- [ ] [M] Cache in SQLite or Parquet; refresh DMI every 3 h, ensemble every 12 h; store source issue times.
+- [ ] [M] Save HR1 CSV/JSON demo fallback to `data/snapshots/`.
+- [ ] [M] Verify matching Open-Meteo wind and ECMWF wave ensemble members.
+- [ ] [C] Add ECMWF lightning density (`litota1/3/6`).
+- [ ] [C] Deploy (DigitalOcean credit expires after 2026-10-31; local demo is OK).
 
-## B, Engine
+## B. Engine
 
-- [ ] [M] Model profilů: lodě (CTV 1,5 m, SOV 2,5 m, nastavitelné do 3,5 m, plavba), úkoly (gondola 20 m/s, hub 15 m/s, zvedání 10 m/s), společné (blesky, světlo, viditelnost 1 km). U každé hodnoty zdroj a poznámka „výchozí, nastavitelné“.
-- [ ] [M] Seznam farem a přístavů (HR1/HR2 Esbjerg, HR3 Hvide Sande), doba plavby.
-- [ ] [M] Kontrola limitů po hodinách a členech: ano/ne + seznam porušených limitů. Vítr lodi z 10 m, vítr turbíny ze 100 m.
-- [ ] [M] Denní světlo přes `astral` (Europe/Copenhagen).
-- [ ] [M] Hledání souvislého okna: plavba tam + práce + plavba zpět, celé ve světle.
-- [ ] [M] Pravděpodobnost dne = podíl členů s oknem.
-- [ ] [M] Úrovně jistoty: 0–60 h vysoká (DMI), 3–15 dní střední/nízká, 16–21 dní jen výhled.
-- [ ] [M] Limitující parametr (limit porušený nejvíc členy) a datum přepočtu (vstup do 60h horizontu).
-- [ ] [S] Ranking: pravděpodobnost, rezerva k limitům, jistota, po sobě jdoucí dny. Jednoduchý, vysvětlitelný vzorec.
-- [ ] [M] `check_task_fits`: poslední bezpečný začátek, poslední transfer zpět.
-- [ ] [M] Briefing pack JSON < 1 MB (metadata, 0–60 h hodinově, percentily do 15 dní, předpočítaná okna, světlo, limity); engine umí číst pack místo cache.
-- [ ] [S] Záloha pro H3: nejistota vln z rozptylu ensemble větru, označená jako aproximace.
-- [ ] [M] Unit testy: okna, pravděpodobnost, `null` hodnoty, přechod času (25. 10.), východ/západ slunce.
+- [ ] [M] Model profiles: vessels (CTV 1.5 m, SOV 2.5 m, configurable to 3.5 m, transit); tasks (nacelle 20 m/s, hub 15 m/s, lifting 10 m/s); shared (lightning, daylight, 1 km visibility). Mark each value's source and “default, configurable” status.
+- [ ] [M] Add farms/ports (HR1/HR2 Esbjerg, HR3 Hvide Sande) and transit times.
+- [ ] [M] Check hourly limits per ensemble member: pass/fail + breached limits. Use 10 m vessel wind and 100 m turbine wind.
+- [ ] [M] Calculate daylight with `astral` (Europe/Copenhagen).
+- [ ] [M] Find continuous windows for outbound transit + work + return transit, all in daylight.
+- [ ] [M] Daily probability = share of members with a viable window.
+- [ ] [M] Confidence: high at 0–60 h (DMI), medium/low at 3–15 days, outlook only at 16–21 days.
+- [ ] [M] Show limiting parameter (most member breaches) and recalculation date (entry into 60 h horizon).
+- [ ] [S] Rank by probability, limit margin, confidence, and consecutive days; use a simple explainable formula.
+- [ ] [M] `check_task_fits`: latest safe start and return transfer.
+- [ ] [M] Keep briefing pack JSON under 1 MB: metadata, hourly 0–60 h, percentiles through day 15, precomputed windows, daylight, limits. Engine can use pack instead of cache.
+- [ ] [S] H3 fallback: estimate wave uncertainty from wind ensemble spread; label as approximate.
+- [ ] [M] Unit-test windows, probability, `null`s, DST change (Oct 25), sunrise/sunset.
 
-## C, Agent
+## C. Agent
 
-- [ ] [M] Vybrat model podle evalu (2–3 kandidáti do 10B), kvantizace běžící offline na notebooku. Do README název, velikost, licenci.
-- [ ] [M] Vlastní smyčka nad Ollama chat API s tool callingem (bez frameworku).
-- [ ] [M] Nástroje jako FastAPI endpointy i agent tools: `list_sites`, `build_job_profile`, `find_windows`, `explain_day`, `check_task_fits`, `get_conditions_now`, `data_status`.
-- [ ] [M] Endpoint pro chat, který vrací text odpovědi + seznam volání nástrojů (název, vstup, krátký výstup) pro panel nástrojů.
-- [ ] [M] System prompt: čísla jen z nástrojů, vždy stáří dat, nikdy „bezpečné“/„go“, limity nelze změnit konverzací („co kdyby“ jen jako označená simulace), offline + data > 12 h bez časového doporučení, jazyk uživatele.
-- [ ] [M] Offline režim: stejný agent, zdroj dat = briefing pack; `get_conditions_now` offline vrací, že živé blesky nejsou.
-- [ ] [M] Eval: `eval/prompts.yaml` (15 dotazů: 5 plánování, 3 vysvětlení, 4 offline, 3 záludné) a `eval/run_eval.py` (správné nástroje a pořadí, čísla shodná s výstupy, stáří dat, žádné „bezpečné“).
-- [ ] [S] Kontrola v kódu, že odpověď neobsahuje „bezpečné“/„safe“/„go“ (pojistka nad promptem).
-- [ ] [C] Krajní záloha: formulář pro profil, LLM jen vysvětluje.
+- [ ] [M] Evaluate 2–3 offline, quantized Ollama models up to 10B; document name, size, license in README.
+- [ ] [M] Build a custom loop over Ollama chat API with tool calling (no framework).
+- [ ] [M] Expose tools as FastAPI endpoints and agent tools: `list_sites`, `build_job_profile`, `find_windows`, `explain_day`, `check_task_fits`, `get_conditions_now`, `data_status`.
+- [ ] [M] Chat endpoint returns response text and tool calls (name, input, short output) for the tool panel.
+- [ ] [M] System prompt: numbers only from tools; show data age; never say “safe”/“go”; conversation cannot change limits (“what-if” must be labeled simulation); if offline or data is >12 h old, give no time recommendation; reply in user's language.
+- [ ] [M] Offline agent uses the briefing pack; `get_conditions_now` reports that live lightning is unavailable.
+- [ ] [M] Add `eval/prompts.yaml` (15 prompts: 5 planning, 3 explanations, 4 offline, 3 tricky) and `eval/run_eval.py` (tool choice/order, output-matched numbers, data age, no “safe”).
+- [ ] [S] Add code-level guard against “safe” / “go” in responses.
+- [ ] [C] Last-resort fallback: profile form; LLM only explains.
 
-## D, Frontend a demo
+## D. Frontend and demo
 
-- [ ] [M] Layout Planner: chat vlevo, dashboard vpravo, panel nástrojů dole.
-- [ ] [M] Kalendář 21 dní: barva podle pravděpodobnosti, šrafování podle jistoty, dny 16–21 jako výhled.
-- [ ] [M] Detail dne (ECharts): hodinová osa, pruh pro každý limit, okno, plavba, světlo, limitující parametr, datum přepočtu.
-- [ ] [M] Dashboard se kreslí z výsledků nástrojů (API), nikdy z JSONu od LLM.
-- [ ] [M] Panel nástrojů s každým voláním agenta.
-- [ ] [M] Technik offline: úzké rozložení, odpočet do posledního transferu, stáří dat (zelená < 6 h, žlutá 6–12 h, > 12 h jen informace), chat.
-- [ ] [S] Daily brief: karta s oknem a pravděpodobností, hodnoty teď proti limitům, mapa blesků 48/80 km, stáří dat.
-- [ ] [S] Editor profilů s poznámkou o původu výchozí hodnoty.
-- [ ] [M] Zobrazení v Europe/Copenhagen, atribuce zdrojů (DMI, ECMWF, Open-Meteo) a upozornění „podpora rozhodování, rozhoduje kapitán“ v UI.
-- [ ] [M] Přejmenovat PWA manifest z „Offshore Weather“ na Harbour Pulse (pokud zůstane název).
-- [ ] [M] Scénář dema (3 min) podle PLAN.md, předem připravený dotaz na 4 dny na HR1.
+- [ ] [M] Planner layout: chat left, dashboard right, tool panel below.
+- [ ] [M] 21-day calendar: color by probability, hatching by confidence, days 16–21 as outlook.
+- [ ] [M] Day detail (ECharts): hourly timeline, limit bars, window, transit, daylight, limiting parameter, recalculation date.
+- [ ] [M] Render dashboard only from API tool results, never LLM JSON.
+- [ ] [M] Show every agent tool call in the tool panel.
+- [ ] [M] Offline technician view: narrow layout, countdown to last return transfer, data age (green <6 h, yellow 6–12 h, >12 h informational only), chat.
+- [ ] [S] Daily brief: window/probability, current values vs. limits, 48/80 km lightning map, data age.
+- [ ] [S] Profile editor with default-value sources.
+- [ ] [M] Use Europe/Copenhagen; attribute DMI, ECMWF, Open-Meteo; show “decision support; captain decides”.
+- [ ] [M] Rename PWA manifest from “Offshore Weather” to Harbour Pulse, if retained.
+- [ ] [M] Prepare a 3-minute demo from PLAN.md and a preloaded 4-day HR1 query.
 
-## Pitch, README, odevzdání
+## Pitch, README, submission
 
-- [ ] [M] Přepsat `README.md`: co to je, screenshot, spuštění jedním příkazem (včetně `ollama pull` a offline režimu), model a licence, závislosti, zdroje dat a licence, výchozí limity a jejich původ, výsledek evalu.
-- [ ] [M] `ATTRIBUTION.md`: DMI (CC BY 4.0), ECMWF (CC BY 4.0), Open-Meteo (CC BY 4.0, API nekomerční).
-- [ ] [M] Aktualizovat `claude.md` a `agents.md`: teď popisují browserový Qwen jen na shrnutí a zakazují mu cokoli dalšího; po přechodu na agenta je přepsat (bezpečnostní pravidla zachovat).
-- [ ] [M] Doplnit URL ke zdrojům v PLAN.md (teď jen názvy).
-- [ ] [M] Přidat obrázky MoSCoW, architektury a harmonogramu do `docs/`.
-- [ ] [S] Slajd s mapou konkurence (StormGeo, DTN, DHI, ABB OCTOPUS, 4insight, SeaPlanner, ForeCoast, UWiSE).
-- [ ] [M] Test „člověk mimo tým“: najde licenci, pochopí AI část, projde README.
-- [ ] [M] Odevzdání přes OrganizerHQ Challenges, kategorie Best Open-Source AI Project.
+- [ ] [M] Rewrite `README.md`: purpose, screenshot, one-command setup (including `ollama pull` and offline mode), model/license, dependencies, data sources/licenses, default limits/sources, eval results.
+- [ ] [M] Add `ATTRIBUTION.md`: DMI and ECMWF (CC BY 4.0); Open-Meteo (CC BY 4.0, non-commercial API).
+- [ ] [M] Update `claude.md` and `agents.md`: replace browser-Qwen-only guidance after agent migration; retain safety rules.
+- [ ] [M] Add source URLs to PLAN.md.
+- [ ] [M] Add MoSCoW, architecture, and timeline diagrams to `docs/`.
+- [ ] [S] Add competitor map slide (StormGeo, DTN, DHI, ABB OCTOPUS, 4insight, SeaPlanner, ForeCoast, UWiSE).
+- [ ] [M] Have someone outside the team find the license, understand the AI, and follow README.
+- [ ] [M] Submit via OrganizerHQ Challenges, Best Open-Source AI Project.
 
-## Checkpointy
+## Checkpoints
 
-- [ ] **H3:** end to end na skutečných datech pro HR1. Rozhodnout ECMWF `waef` vs. aproximace. Když end to end nejede, škrtnout Should.
-- [ ] **H6, feature freeze:** jen opravy, README, testy. Checklist licencí a atribucí.
-- [ ] **H6–H7:** test bez wifi na demo notebooku (model, briefing pack, agent), nahrát záložní video, vygenerovat záložní briefing pack.
-- [ ] **H7–H8:** dvě zkoušky dema, odevzdat s rezervou.
+- [ ] **H3:** Run end-to-end on real HR1 data; choose ECMWF `waef` or approximation. Drop Should items if it fails.
+- [ ] **H6, feature freeze:** bug fixes, README, tests only; check licenses and attribution.
+- [ ] **H6–H7:** Test offline on demo laptop (model, briefing pack, agent); record backup video and generate backup pack.
+- [ ] **H7–H8:** Rehearse twice and submit early.
