@@ -21,6 +21,19 @@ async function getEngine(onProgress: (progress: InitProgressReport) => void) {
   return enginePromise
 }
 
+export const CUT_OFF_NOTE = 'Cut off at the local model’s length limit.'
+
+// Drops a half-written last sentence or bullet so a cut-off answer ends cleanly.
+function trimCutOff(text: string): string {
+  const lines = text.split('\n')
+  if (lines.length > 1) lines.pop()
+  else {
+    const end = Math.max(text.lastIndexOf('. '), text.lastIndexOf('.\n'))
+    if (end > 0) return `${text.slice(0, end + 1)}\n\n_${CUT_OFF_NOTE}_`
+  }
+  return `${lines.join('\n').trimEnd()}\n\n_${CUT_OFF_NOTE}_`
+}
+
 export async function generateLocalSummary(
   prompt: string,
   onProgress: (progress: InitProgressReport) => void,
@@ -37,6 +50,7 @@ export async function generateLocalChatReply(
   messages: { role: 'user' | 'assistant'; content: string }[],
   context: string,
   onProgress: (progress: InitProgressReport) => void,
+  maxTokens = 220,
   maxTokens = 220,
 ): Promise<string> {
   if (!('gpu' in navigator)) {
@@ -55,10 +69,12 @@ export async function generateLocalChatReply(
     ],
     temperature: 0.2,
     max_tokens: maxTokens,
+    max_tokens: maxTokens,
   })
-  const answer = response.choices[0]?.message.content
+  const choice = response.choices[0]
+  const answer = choice?.message.content
   if (typeof answer !== 'string' || !answer.trim()) {
     throw new Error('The browser model returned an empty summary. Try again.')
   }
-  return answer.trim()
+  return choice.finish_reason === 'length' ? trimCutOff(answer.trim()) : answer.trim()
 }

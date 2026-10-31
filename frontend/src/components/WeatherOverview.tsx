@@ -12,6 +12,7 @@ import {
   type TechnicianTask,
 } from '@/lib/technician-tasks'
 import { Button } from '@/components/ui/button'
+import { ModelText } from '@/components/ModelText'
 
 function DailyMetric({
   icon,
@@ -84,13 +85,17 @@ function summaryPrompt(
   })
   return [
     `Summarize this hourly forecast for ${siteName} on ${date}.`,
-    'Write a concise day brief that explicitly considers every scheduled task and hourly forecast points overlapping each task window. Explain plausible weather impacts and timing, and identify tasks with no overlapping forecast data.',
-    'Summarize only the supplied forecast hours. If coverage is partial, say so and do not imply these are all 24 hours.',
-    'Do not match hourly forecast points from outside a task’s scheduled window to that task.',
-    'Mention weather factors that may affect vessel access or maintenance, but do not invent operating thresholds or claim a threshold crossing.',
-    'Wind readings are at 10 m and must not be compared to any 100 m work limit.',
-    'Do not make a go/no-go decision. State that this is a forecast, not an observation.',
-    JSON.stringify({ scheduled_tasks: taskWindows, hourly_forecast: table }),
+    'Reply in exactly this plain-text format, with no title and no other sections:',
+    'Overview: one sentence on overall wind, waves and visibility.',
+    'Changes:',
+    '- HH:MM – one meaningful change, with its value and unit',
+    '(at most 4 change lines; skip small or flat changes; write "- None" if nothing changes meaningfully)',
+    'Watch: one sentence on factors that may affect vessel access or maintenance.',
+    'Use the units in the field names: wind and gusts in kn, waves in m, period in s, visibility in m, precipitation in %.',
+    'Summarize only the supplied forecast hours. If coverage is partial, say so in the overview.',
+    'Do not invent operating thresholds or claim a threshold crossing. Wind readings are at 10 m and must not be compared to any 100 m work limit.',
+    'Do not make a go/no-go decision.',
+    JSON.stringify({ hourly_forecast: table }),
   ].join('\n')
 }
 
@@ -330,7 +335,10 @@ export function WeatherOverview({
         {summary?.date === selectedDate && (
           <div className="mt-3 border-t border-primary/15 pt-3" aria-live="polite">
             <p className="text-xs font-semibold text-primary">Local AI summary</p>
-            <p className="mt-1 text-sm leading-relaxed">{summary.text}</p>
+            <ModelText text={summary.text} className="mt-1" />
+            <p className="mt-2 text-[0.7rem] text-muted-foreground">
+              Written on this device by a small model from the saved forecast. Check values against the forecast below.
+            </p>
           </div>
         )}
 
